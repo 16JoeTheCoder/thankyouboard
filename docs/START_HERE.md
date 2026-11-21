@@ -1,0 +1,3 @@
+# Starting Codex prompt
+
+Use GPT-6.2 Astra on Medium. Read `docs/BUILD_PROMPT.md`, `docs/design-references.md`, and `setup.md`, then build the complete STJBS Teacher Appreciation Wall. Treat the images as loose inspiration only. Establish a stronger original visual system and implement each admin route as its own view in one collapsible sidebar shell. Preserve the paper-letter wall, teacher passphrase, Google admin sign-in, and print/PDF flow. Use GPT-6.2 Sol Medium agents for independent QA against the compiled Wrangler demo with no Playwright CLI. Fix and re-run failures, then open an implementation PR to `main`. Use `setup.md` for the deployment handoff. Keep real notes and secrets private.
