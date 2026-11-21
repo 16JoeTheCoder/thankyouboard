@@ -1,21 +1,29 @@
 # Design references
 
-These are design comps with sample content. The behavioral requirements live in the [build prompt](BUILD_PROMPT.md).
+**Use these as loose inspiration only.** They show a few useful ideas for visual hierarchy, paper depth and task organization. Build a stronger original interface with its own typography, spacing and interactions. Use the [build prompt](BUILD_PROMPT.md) for requirements. The screenshots contain synthetic copy and illustrative states.
 
-## Board
+## Teacher wall
 
-![Layered paper notes forming oversized THANK YOU lettering](design/board.webp)
+![Kinetic paper letters](design/board.webp)
 
-Keep the scale contrast, letter silhouettes, and paper depth. Show real excerpts on larger cards. Keep Find my notes above the composition and provide a browsable list on small screens. Omit the Write a Note control shown in the comp.
+Take the idea of notes at different scales forming the lettering. Real student-note excerpts, legible tap targets and a clear path into the reader carry the experience.
+
+![Mobile teacher flow](design/teacher-journey.webp)
+
+This is a sequence of four separate views, from passphrase through the personal reader.
 
 ## Admin
 
-![Notes manager with a searchable table and editor](design/admin.webp)
+![One admin overview view with expanded sidebar](design/admin-overview.webp)
 
-Use the list-and-editor structure. Replace mock copy and any invented crest. Add explicit states for hidden notes, full capacity, conflicting edits, and unsaved or failed changes.
+![One access view with collapsed icon sidebar](design/admin-access.webp)
 
-## Print
+Use one shared navigation shell. Overview, Notes, Teachers, Change history, Backup & restore, and Access each open their own route. Use a contextual editor or details panel where it helps. The real teacher wall is read-only for teachers and sample access copy is illustrative.
 
-![Botanical, Rose Letter, Blue Ink, Gallery, and Letterpress](design/keepsakes.webp)
+## Export
 
-Treat these layouts as five distinct typographic styles. Build a preview using the teacher's selected notes and the chosen paper dimensions. Verify single-page and multi-page outputs.
+![Export workspace](design/export-workspace.webp)
+
+![Five keepsake styles](design/keepsakes.webp)
+
+Prioritize note selection, a live print preview and quick output. Render the actual selected paper dimensions. A4 starts in portrait.
