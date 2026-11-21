@@ -2,7 +2,7 @@
 
 ## Assignment
 
-Build the complete application in one delivery. Use GPT-6.2 Astra on Medium for implementation. Start from the current `main`, create a review branch, and open a PR targeting `main` for Josef to approve. Use the repository's design tooling, including Impeccable when available. Assign independent QA to GPT-6.2 Sol subagents on Medium. The product is a read-only gift for staff, with a separate Student Council admin surface.
+Build the complete application in one delivery. This Codex assignment covers implementation and local simulation only. Do not deploy, upload a remote preview, use Cloudflare credentials, or change live cloud resources. The owner's separate Claude Code terminal agent will run `setup.md` later for deployment. Use GPT-6.2 Astra on Medium for implementation. Start from the current `main`, create a review branch, and open a PR targeting `main` for Josef to approve. Use the repository's design tooling, including Impeccable when available. Assign independent QA to GPT-6.2 Sol subagents on Medium. The product is a read-only gift for staff, with a separate Student Council admin surface.
 
 ## 1. Board and visual direction
 
@@ -26,11 +26,11 @@ Offer **Botanical**, **Rose Letter**, **Blue Ink**, **Gallery**, and **Letterpre
 
 ## 3. Server, data and access
 
-Use React, TypeScript, Cloudflare Pages Functions and D1, unless the repository already has a compatible equivalent. Deliver a reproducible production build, local demo, database migrations, and deployment runbook. Follow the repository-root [setup.md](../setup.md) for Cloudflare and Google OAuth configuration. Deploy a private preview or use an authorized existing Cloudflare project when credentials and a target exist. Report the exact blocker when deployment cannot be verified.
+Use React, TypeScript, Cloudflare Pages Functions and D1, unless the repository already has a compatible equivalent. Deliver a reproducible production build, local demo, database migrations, and deployment-ready configuration. Read the repository-root [setup.md](../setup.md) for the interface your code needs to support. The owner’s Claude Code terminal agent will execute the runbook later.
 
 Provide a one-time private seed command for the approved JSON, shaped as `{ "notes": [{ "id": "...", "teacher": "...", "text": "..." }] }`. Keep stable note identifiers, teacher display names and exact note text. Validate 500 distinct IDs, 41 teachers, and at least 3 per teacher before committing the seed. An identical rerun is idempotent and never overwrites moderation changes. The destination repository is public. The owner supplies the real file and chosen passphrase privately. Keep them out of Git history, commits, public previews, build output, static assets, and test artifacts. Include an isolated synthetic fixture with the same counts, including a 55-note group. No bulk import UI.
 
-The teacher gate verifies a deployment secret server-side and issues a revocable 30-day browser session over HTTPS. Support sign out, reasonable throttling, and passphrase rotation with session revocation. Keep teacher access read-only and verify authorization on every protected read. Use Google sign-in through Cloudflare Access for named council administrators. Configure an explicit administrator allowlist and validate the Access JWT at the application boundary on each admin read and mutation. Teacher access continues to use the separate passphrase. Use the [deployment runbook](../setup.md) for the existing Google OAuth client and exact Cloudflare callback. Keep the clearly labeled demo's credentials and test data isolated from production. Avoid logging note bodies or secrets.
+The teacher gate verifies a deployment secret server-side and issues a revocable 30-day browser session over HTTPS. Support sign out, reasonable throttling, and passphrase rotation with session revocation. Keep teacher access read-only and verify authorization on every protected read. Use Google sign-in through Cloudflare Access for named council administrators. Configure an explicit administrator allowlist and validate the Access JWT at the application boundary on each admin read and mutation. Teacher access continues to use the separate passphrase. Prepare the server-side integration for the deployment agent to configure later. Use mock identities only in the isolated local demo and keep the production authentication path fail-closed. Keep the clearly labeled demo's credentials and test data isolated from production. Avoid logging note bodies or secrets.
 
 ## 4. Admin interface and recovery
 
@@ -48,7 +48,7 @@ Build one polished admin shell with a left sidebar that collapses to accessible 
 
 ## 5. Preview and independent release checks
 
-Build with `npm run build` and serve the compiled assets plus real local Functions and a separate synthetic D1 dataset using a documented `npm run demo` command based on Wrangler. Provide a one-command reset for the demo database. Use Codex browser or Chrome/Edge to review the real demo at desktop and phone sizes. For repeatable tests, invoke a JavaScript browser runner through npm, using Playwright's Node API or Puppeteer when browser support is available. Do not depend on the Playwright CLI. If loopback is inaccessible in the browser tool, use authorized port forwarding or an isolated preview with synthetic data only. If neither works, report browser QA as blocked and continue server/unit checks independently.
+Build with `npm run build` and serve the compiled assets plus real local Functions and a separate synthetic D1 dataset using a documented `npm run demo` command based on Wrangler. Provide a one-command reset for the demo database. Use Codex browser or Chrome/Edge to review the real demo at desktop and phone sizes. For repeatable tests, invoke a JavaScript browser runner through npm, using Playwright's Node API or Puppeteer when browser support is available. Do not depend on the Playwright CLI. If the browser tool cannot reach loopback, run the local browser from the same machine as Wrangler using the JavaScript runner. If local browser execution is unavailable, report that blocker and continue local server and unit checks independently.
 
 Give separate GPT-6.2 Sol Medium subagents fresh QA context and assign these passes.
 
@@ -56,4 +56,4 @@ Give separate GPT-6.2 Sol Medium subagents fresh QA context and assign these pas
 2. **Admin and data.** Verify unauthenticated access, teacher/admin role boundaries, 30-day session persistence and revocation, hide propagation, write failure, concurrent slot allocation, retries, and restoration at capacity. Verify stable slot IDs and no leaks through public assets or fixtures.
 3. **Export.** Test one note, a sparse selection, and all 55 notes. Exercise five layouts and four paper dimensions through programmatic PDF checks, with visual sampling of every layout and paper size. Inspect A6 overflow, long and mixed-script notes, page breaks, hidden-note exclusion, no horizontal clipping, and exact selections.
 
-Each pass returns observed results with commands, screenshots, PDFs or traces, and reproduction steps for failures. Astra fixes and reruns failed checks. End with PR URL, preview instructions or URL, and any remaining owner-only deployment inputs. Do not merge the PR.
+Each pass returns observed results with commands, screenshots, PDFs or traces, and reproduction steps for failures. Astra fixes and reruns failed checks. End with the PR URL, local reproduction commands, test evidence, and any unverified local checks. Do not merge the PR.
