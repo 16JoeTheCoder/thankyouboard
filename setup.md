@@ -1,6 +1,8 @@
 # Cloudflare deployment runbook
 
-This file is an execution handoff. Deploy the approved Teacher Appreciation Wall from start to finish using the attached Cloudflare credential, Wrangler and the Cloudflare API. The owner should only need to complete a Google OAuth Console step if the correct OAuth client is missing or its redirect settings need updating. This repository is public. Keep live notes, credentials, administrator emails and account-specific values out of Git and public preview output.
+This runbook is for the owner’s Claude Code terminal agent to execute later, once the application is approved for deployment. The Codex build task ends after implementation and local simulation.
+
+Deploy the approved Teacher Appreciation Wall from start to finish using the attached Cloudflare credential, Wrangler and the Cloudflare API. The owner should only need to complete a Google OAuth Console step if the correct OAuth client is missing or its redirect settings need updating. This repository is public. Keep live notes, credentials, administrator emails and account-specific values out of Git and public preview output.
 
 ## 1. Resolve the account and release inputs
 
