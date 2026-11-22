@@ -17,6 +17,15 @@ The production Pages configuration is `wrangler.toml`. It declares the `DB` D1 b
 | `ACCESS_AUD` | Audience tag for this Access application |
 | `ADMIN_EMAILS` | Comma-separated named Google identities approved by the owner |
 | `DEDICATION` | Optional Student Council dedication text |
+| `ACCESS_MANAGERS` | Comma-separated emails, each also in `ADMIN_EMAILS`, who may add council members and change the teacher passphrase from the Access view |
+| `CF_API_TOKEN` (secret), `CF_ACCOUNT_ID`, `ACCESS_APP_ID`, `ACCESS_POLICY_ID` | Required for adding or removing council members. A token scoped only to **Access: Apps and Policies: Edit** lets the Access view update the admin app's allow policy. Without all four, member changes are refused and nothing else is affected |
+
+### Council members and the passphrase from the Access view
+
+- `ADMIN_EMAILS` are full administrators. `ACCESS_MANAGERS` are the administrators who can also manage members and the passphrase. Members added in the Access view are read-only: they can open the council desk and preview the wall at `/admin/wall`, and every change is refused server-side.
+- Adding or removing a member updates the Cloudflare Access allow policy first. If that fails, nothing is saved. Administrators in `ADMIN_EMAILS` always stay on the policy. Use the policy ID of the **Named council admins** policy on the admin Access application.
+- A passphrase set in the Access view is stored hashed (PBKDF2) and overrides `TEACHER_PASSPHRASE`. Saving it signs every teacher out. "Use deployment passphrase" removes the override. Until one is set, `TEACHER_PASSPHRASE` works exactly as before.
+- Apply migration `0003_access.sql` before deploying this version (`wrangler d1 migrations apply <production-db-name> --remote`). If it is missing, teachers and administrators keep working with the deployment settings, but the new Access features report errors.
 
 Leave `LOCAL_DEMO` unset on Cloudflare. Apply Access to `/admin`, `/admin/*`, `/api/admin` and `/api/admin/*`. Teacher APIs under `/api/` perform their own session checks. Rotating either teacher secret invalidates existing teacher session tokens.
 

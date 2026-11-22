@@ -1,8 +1,8 @@
-import { adminIdentity } from '../../server/auth'
+import { adminSession } from '../../server/auth'
 import { Failure, isDemo, privateHeaders, type Env } from '../../server/types'
 export const onRequest: PagesFunction<Env> = async ({ request, env }) => {
   try {
-    if (!isDemo(request, env)) await adminIdentity(request, env)
+    if (!isDemo(request, env)) await adminSession(request, env)
     const asset = await (env as Env & { ASSETS: Fetcher }).ASSETS.fetch(
       new URL('/index.html', request.url),
     )

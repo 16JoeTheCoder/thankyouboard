@@ -6,6 +6,13 @@ export interface Env {
   ACCESS_ISSUER?: string
   ACCESS_AUD?: string
   ADMIN_EMAILS?: string
+  /** Comma-separated emails (a subset of ADMIN_EMAILS) who may manage council members and the passphrase. */
+  ACCESS_MANAGERS?: string
+  /** Optional: lets the Access view keep the Cloudflare Access allow policy in step with council members. */
+  CF_API_TOKEN?: string
+  CF_ACCOUNT_ID?: string
+  ACCESS_APP_ID?: string
+  ACCESS_POLICY_ID?: string
   LOCAL_DEMO?: string
   DEDICATION?: string
 }
