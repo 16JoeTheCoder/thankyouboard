@@ -54,7 +54,6 @@ type Panel =
   | { type: 'teacher'; teacher: string }
   | { type: 'note'; id: string }
   | { type: 'all' }
-type Peek = { id: string; x: number; y: number }
 const themes = ['Original', 'After Hours', 'Blue Hour', 'Garden'] as const
 type Theme = (typeof themes)[number]
 const fallbackDedication =
@@ -323,6 +322,111 @@ function Dedication({ copy, close }: { copy: string; close: () => void }) {
     </main>
   )
 }
+// Rasterize the paper print once per size/theme/data revision. Native buttons
+// retain every slot's geometry and semantics without 500 rotated paint layers.
+const PrintedWall = memo(function PrintedWall({
+  notes,
+  theme,
+}: {
+  notes: WallNote[]
+  theme: Theme
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const surface = canvas.current!
+    const brush = surface.getContext('2d')
+    if (!brush) return
+    let mounted = true
+    function draw() {
+      if (!mounted || !brush) return
+      const width = surface.clientWidth,
+        height = surface.clientHeight
+      if (!width || !height) return
+      const ratio = Math.min(devicePixelRatio, 2)
+      surface.width = Math.round(width * ratio)
+      surface.height = Math.round(height * ratio)
+      brush.scale(ratio, ratio)
+      const style = getComputedStyle(surface)
+      const palettes = Array.from({ length: 8 }, (_, i) => {
+        const tone = style.getPropertyValue('--p' + i).trim()
+        return [0, 0.13, 0.3, 0.46].map((mix) => {
+          const base = [1, 3, 5].map((at) =>
+            parseInt(tone.slice(at, at + 2), 16),
+          )
+          return (
+            'rgb(' +
+            base
+              .map((v, k) => Math.round(v + ([255, 245, 215][k] - v) * mix))
+              .join(',') +
+            ')'
+          )
+        })
+      })
+      for (const note of notes) {
+        const slot = wallSlots[note.slot]
+        if (!slot) continue
+        const w = Math.max(1, (width * slot.width) / 100 - 0.6),
+          h = Math.max(1, (height * slot.height) / 100 - 0.6)
+        brush.save()
+        brush.translate(
+          (width * slot.left) / 100 + w / 2,
+          (height * slot.top) / 100 + h / 2,
+        )
+        brush.rotate((slot.tilt * Math.PI) / 180)
+        brush.translate(-w / 2, -h / 2)
+        brush.fillStyle = '#69574640'
+        brush.fillRect(0.8, 1.4, w, h)
+        brush.fillStyle = palettes[slot.letter][slot.variant]
+        brush.fillRect(0, 0, w, h)
+        brush.strokeStyle = '#68564b2b'
+        brush.lineWidth = 0.6
+        brush.strokeRect(0.3, 0.3, w - 0.6, h - 0.6)
+        if (slot.large) {
+          brush.fillStyle = '#64534d2b'
+          brush.fillRect(w * 0.13, h * 0.89, w * 0.34, 0.55)
+          brush.fillStyle = '#fff7dc66'
+          brush.beginPath()
+          brush.moveTo(w, h)
+          brush.lineTo(w * 0.83, h)
+          brush.lineTo(w, h - w * 0.17)
+          brush.fill()
+        }
+        if (slot.excerpt) {
+          const fontSize = Math.min(8, Math.max(3, width * 0.006))
+          brush.beginPath()
+          brush.rect(w * 0.12, h * 0.1, w * 0.77, h * 0.72)
+          brush.clip()
+          brush.font =
+            'italic ' + fontSize + 'px "Instrument Serif", Georgia, serif'
+          brush.fillStyle = '#382d29'
+          brush.textBaseline = 'top'
+          const words = note.text.slice(0, 56).split(/\s+/)
+          let line = '',
+            y = h * 0.15
+          for (const word of words) {
+            const joined = line ? line + ' ' + word : word
+            if (line && brush.measureText(joined).width > w * 0.76) {
+              brush.fillText(line, w * 0.12, y)
+              y += fontSize
+              line = word
+              if (y >= h * 0.8) break
+            } else line = joined
+          }
+          if (y < h * 0.8) brush.fillText(line, w * 0.12, y)
+        }
+        brush.restore()
+      }
+    }
+    const observer = new ResizeObserver(draw)
+    observer.observe(surface)
+    void document.fonts.ready.then(draw)
+    return () => {
+      mounted = false
+      observer.disconnect()
+    }
+  }, [notes, theme])
+  return <canvas className="printed-wall" ref={canvas} aria-hidden="true" />
+})
 const Cards = memo(function Cards({
   notes,
   spot,
@@ -362,32 +466,90 @@ const Cards = memo(function Cards({
             tabIndex={i === 0 ? 0 : -1}
             aria-label={'Read note for ' + n.teacher}
           >
-            <span className="paper-face">
-              {s.excerpt && <span>{n.text.slice(0, 56)}</span>}
-            </span>
+            {match && (
+              <span className="paper-face">
+                <span>{s.excerpt && n.text.slice(0, 56)}</span>
+              </span>
+            )}
           </button>
         )
       })}
     </>
   )
 })
+// A coarse spatial index keeps desktop hit testing independent of the number
+// of paper buttons. Touch and keyboard access still use the native controls.
+const hitColumns = 48,
+  hitRows = 24
+const hitCells: number[][] = Array.from(
+  { length: hitColumns * hitRows },
+  () => [],
+)
+wallSlots.forEach((slot, index) => {
+  const lastCol = Math.min(
+    hitColumns - 1,
+    Math.floor(((slot.left + slot.width) * hitColumns) / 100),
+  )
+  const lastRow = Math.min(
+    hitRows - 1,
+    Math.floor(((slot.top + slot.height) * hitRows) / 100),
+  )
+  for (
+    let row = Math.floor((slot.top * hitRows) / 100);
+    row <= lastRow;
+    row++
+  ) {
+    for (
+      let col = Math.floor((slot.left * hitColumns) / 100);
+      col <= lastCol;
+      col++
+    )
+      hitCells[row * hitColumns + col].push(index)
+  }
+})
 function BoardArt({
   notes,
+  theme,
   spot,
   onNote,
 }: {
   notes: WallNote[]
   spot: string | null
+  theme: Theme
   onNote: (id: string) => void
 }) {
-  const [peek, setPeek] = useState<Peek | null>(null),
-    byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes]),
-    latest = useRef<HTMLElement | null>(null)
+  const byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes])
+  const board = useRef<HTMLDivElement>(null)
+  const hitPlane = useRef<HTMLDivElement>(null)
+  const visibleBySlot = useMemo(
+    () => new Map(notes.map((note) => [note.slot, note])),
+    [notes],
+  )
+  const lifted = useRef<HTMLDivElement>(null)
+  const preview = useRef<HTMLDivElement>(null)
+  const size = useRef({ width: 0, height: 0 })
+  const current = useRef<WallNote | undefined>(undefined)
+  const reveal = useRef<ReturnType<typeof setTimeout> | null>(null)
   const clear = useCallback(() => {
-    latest.current?.classList.remove('paper-active')
-    latest.current = null
-    setPeek(null)
+    if (reveal.current !== null) clearTimeout(reveal.current)
+    reveal.current = null
+    current.current = undefined
+    if (preview.current && !preview.current.hidden) {
+      preview.current.hidden = true
+      if (lifted.current) lifted.current.hidden = true
+    }
   }, [])
+  useEffect(() => {
+    const observer = new ResizeObserver(([entry]) => {
+      size.current = entry.contentRect
+      clear()
+    })
+    if (board.current) observer.observe(board.current)
+    return () => {
+      observer.disconnect()
+      clear()
+    }
+  }, [clear])
   useEffect(() => {
     clear()
   }, [notes, spot, clear])
@@ -402,35 +564,122 @@ function BoardArt({
       window.removeEventListener('blur', clear)
     }
   }, [clear])
-  function activate(target: EventTarget | null) {
-    const el = (target as Element)?.closest<HTMLElement>('button[data-id]')
-    if (el === latest.current) return
-    if (!el) {
+  const activate = useCallback(
+    (note: WallNote | undefined, immediate = false) => {
+      if (note === current.current && (!immediate || !preview.current?.hidden))
+        return
       clear()
-      return
+      const slot = note && wallSlots[note.slot]
+      if (!note || !slot) return
+      current.current = note
+      const { width, height } = size.current
+      const x = (width * slot.left) / 100,
+        y = (height * slot.top) / 100
+      const w = (width * slot.width) / 100,
+        h = (height * slot.height) / 100
+      function printPreview() {
+        const previewEl = preview.current
+        if (current.current !== note || !previewEl || !note) return
+        const card = lifted.current
+        if (card && slot) {
+          card.className =
+            'lifted-paper ink-' + slot.letter + ' tint-' + slot.variant
+          card.style.left = x + 'px'
+          card.style.top = y + 'px'
+          card.style.width = w + 'px'
+          card.style.height = h + 'px'
+          card.firstElementChild!.firstElementChild!.textContent = slot.excerpt
+            ? note.text.slice(0, 56)
+            : ''
+          card.hidden = false
+        }
+        previewEl.firstElementChild!.textContent = note.teacher
+        previewEl.lastElementChild!.textContent = note.text.slice(0, 200)
+        previewEl.style.left =
+          Math.max(85, Math.min(width - 85, x + w / 2)) + 'px'
+        previewEl.style.top = (slot!.top < 22 ? y + h + 4 : y - 4) + 'px'
+        previewEl.classList.toggle('peek-below', slot!.top < 22)
+        previewEl.hidden = false
+        reveal.current = null
+      }
+      // Keep the excerpt steady while crossing tiles en route to another note.
+      if (immediate) printPreview()
+      else reveal.current = setTimeout(printPreview, 95)
+    },
+    [clear],
+  )
+  const hit = useCallback(
+    (x: number, y: number) => {
+      const { width, height } = size.current
+      if (!width || !height) return
+      const u = (x * 100) / width,
+        v = (y * 100) / height
+      const cell =
+        hitCells[
+          Math.floor((v * hitRows) / 100) * hitColumns +
+            Math.floor((u * hitColumns) / 100)
+        ]
+      const index = cell?.find((i) => {
+        const s = wallSlots[i]
+        return (
+          u >= s.left &&
+          u < s.left + s.width &&
+          v >= s.top &&
+          v < s.top + s.height
+        )
+      })
+      return index === undefined ? undefined : visibleBySlot.get(index)
+    },
+    [visibleBySlot],
+  )
+  useEffect(() => {
+    const surface = hitPlane.current!
+    const move = (event: PointerEvent) => {
+      event.stopPropagation()
+      if (event.pointerType === 'touch') return
+      const note = hit(event.offsetX, event.offsetY)
+      if (note === current.current) return
+      if (note) {
+        surface.dataset.slot = String(note.slot)
+        surface.dataset.id = note.id
+      } else {
+        delete surface.dataset.slot
+        delete surface.dataset.id
+      }
+      activate(note)
     }
-    latest.current?.classList.remove('paper-active')
-    latest.current = el
-    el.classList.add('paper-active')
-    const x = parseFloat(el.style.left) + parseFloat(el.style.width) / 2,
-      y = parseFloat(el.style.top)
-    setPeek({ id: el.dataset.id!, x, y })
-  }
-  const n = peek && byId.get(peek.id)
+    const leave = () => {
+      delete surface.dataset.slot
+      delete surface.dataset.id
+      clear()
+    }
+    const stop = (event: Event) => event.stopPropagation()
+    surface.addEventListener('pointermove', move, { passive: true })
+    surface.addEventListener('mousemove', stop, { passive: true })
+    surface.addEventListener('pointerleave', leave)
+    return () => {
+      surface.removeEventListener('pointermove', move)
+      surface.removeEventListener('mousemove', stop)
+      surface.removeEventListener('pointerleave', leave)
+      leave()
+    }
+  }, [activate, clear, hit])
   return (
     <div className="mat-board">
       <div
+        ref={board}
         className={'paper-board' + (spot ? ' spotlight' : '')}
         aria-label="Thank you wall of student notes"
-        onPointerOver={(e) => {
-          if (e.pointerType !== 'touch') activate(e.target)
-        }}
-        onPointerLeave={clear}
-        onFocus={(e) => activate(e.target)}
+        onFocus={(e) =>
+          activate(byId.get((e.target as HTMLElement).dataset.id || ''), true)
+        }
         onBlur={clear}
         onClick={(e) => {
-          const id = (e.target as Element).closest<HTMLElement>('[data-id]')
-            ?.dataset.id
+          const id =
+            e.target === hitPlane.current
+              ? hit(e.nativeEvent.offsetX, e.nativeEvent.offsetY)?.id
+              : (e.target as Element).closest<HTMLElement>('button[data-id]')
+                  ?.dataset.id
           if (id) {
             clear()
             onNote(id)
@@ -453,7 +702,9 @@ function BoardArt({
           )
             return
           const tiles = Array.from(
-            e.currentTarget.querySelectorAll<HTMLButtonElement>('[data-id]'),
+            e.currentTarget.querySelectorAll<HTMLButtonElement>(
+              'button[data-id]',
+            ),
           )
           const idx = tiles.indexOf(e.target as HTMLButtonElement)
           if (idx < 0 || !tiles.length) return
@@ -477,7 +728,10 @@ function BoardArt({
           tiles[next].focus({ preventScroll: true })
         }}
       >
-        <Cards notes={notes} spot={spot} />
+        <PrintedWall notes={notes} theme={theme} />
+        <div className="paper-base">
+          <Cards notes={notes} spot={spot} />
+        </div>
         <span aria-hidden="true" className="board-postmark">
           <Mail />
           <i />
@@ -486,18 +740,18 @@ function BoardArt({
           With gratitude,
           <br /> <em>STJBS students</em>
         </span>
-        {peek && n && (
-          <div
-            className={'paper-peek' + (peek.y < 22 ? ' peek-below' : '')}
-            style={{
-              left: 'clamp(85px, ' + peek.x + '%, calc(100% - 85px))',
-              top: peek.y + '%',
-            }}
-          >
-            <strong>{n.teacher}</strong>
-            <span>{n.text}</span>
+        <div ref={hitPlane} className="paper-hit-plane" aria-hidden="true" />
+        <div className="paper-hover-plane" aria-hidden="true">
+          <div ref={lifted} hidden>
+            <span className="paper-face">
+              <span />
+            </span>
           </div>
-        )}
+          <div className="paper-peek" ref={preview} hidden>
+            <strong />
+            <span />
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -1070,6 +1324,7 @@ export default function Wall() {
               <p className="wall-empty">There are no visible notes yet.</p>
             ) : (
               <BoardArt
+                theme={theme}
                 notes={notes}
                 spot={spot}
                 onNote={(id) => openPanel({ type: 'note', id })}
