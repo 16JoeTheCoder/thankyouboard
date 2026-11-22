@@ -12,6 +12,7 @@
     "demo:reset": "node scripts/demo.mjs --reset",
     "seed:private": "node scripts/seed.mjs",
     "qa:board": "node tests/board.mjs",
+    "qa:zoom": "node tests/zoom.mjs",
     "qa:admin": "node tests/admin.mjs",
     "qa:export": "node tests/export.mjs",
     "qa:seed": "node tests/seed.mjs",

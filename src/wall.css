@@ -1282,3 +1282,104 @@
     animation: none !important;
   }
 }
+
+/* Zoom and pan */
+.board-pan {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+/* Fit view: one finger still scrolls the page; a pinch belongs to the wall. */
+.paper-board {
+  touch-action: pan-y;
+}
+.paper-board[data-zoomed] {
+  overflow: hidden;
+  overflow: clip;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.paper-board[data-zoomed] .paper-hit-plane:not([data-slot]) {
+  cursor: grab;
+}
+.paper-board[data-panning],
+.paper-board[data-panning] .paper-hit-plane {
+  cursor: grabbing !important;
+}
+/* Keep the preview card and the keyboard focus ring at a readable size however far in the wall is. */
+.paper-board[data-zoomed] .paper-peek {
+  transform-origin: 0 0;
+  scale: var(--inv, 1);
+}
+.paper-board[data-zoomed] .paper-tile:focus-visible {
+  outline-width: calc(3px * var(--inv, 1));
+  outline-offset: calc(3px * var(--inv, 1));
+}
+.board-zoom {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: color-mix(in srgb, var(--sheet) 94%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px #352e1d26;
+  touch-action: manipulation;
+}
+/* At 100% only the way in is shown, so the controls never cover the wall; the rest appears once zoomed. */
+.board-zoom[data-fit] > :not([aria-label='Zoom in']) {
+  display: none;
+}
+.board-zoom[data-fit] {
+  padding: 0;
+}
+.board-zoom button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.board-zoom button:hover {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.board-zoom button[aria-disabled='true'] {
+  opacity: 0.38;
+  cursor: default;
+}
+.board-zoom button[aria-disabled='true']:hover {
+  background: transparent;
+}
+.board-zoom output {
+  min-width: 46px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--soft);
+}
+@media (pointer: coarse) {
+  .board-zoom button {
+    width: 44px;
+    height: 44px;
+  }
+}
+@media (max-width: 540px) {
+  .board-zoom {
+    right: 6px;
+    bottom: 6px;
+  }
+  .board-zoom output {
+    min-width: 40px;
+  }
+}
