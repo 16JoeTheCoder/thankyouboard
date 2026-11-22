@@ -20,19 +20,26 @@ try {
   const access = await import(pathToFileURL(out).href)
 
   const members = new Map()
+  let settingValue = null
   const db = {
+    batch: async (statements) => {
+      for (const s of statements) await s.run()
+    },
     prepare(sql) {
       return {
         bind: (...args) => ({
           run: async () => {
+            if (sql.includes("INTO settings")) settingValue = args[0]
             if (sql.startsWith('INSERT OR IGNORE INTO council_members'))
               members.set(args[0], { email: args[0], addedBy: args[1], addedAt: args[2] })
             if (sql.startsWith('DELETE FROM council_members')) members.delete(args[0])
           },
         }),
         all: async () => ({ results: [...members.values()] }),
-        first: async () => null,
-        run: async () => {},
+        first: async () => (sql.includes('FROM settings') ? settingValue : null),
+        run: async () => {
+          if (sql.includes("DELETE FROM settings")) settingValue = null
+        },
       }
     },
   }
@@ -40,6 +47,8 @@ try {
     DB: db,
     ADMIN_EMAILS: 'boss@example.org,helper@example.org',
     ACCESS_MANAGERS: 'boss@example.org',
+    SESSION_SECRET: 'test-secret',
+    TEACHER_PASSPHRASE: 'deployment-pass',
     CF_API_TOKEN: 'token',
     CF_ACCOUNT_ID: 'acct',
     ACCESS_APP_ID: 'app',
@@ -67,6 +76,19 @@ try {
   await rejects(access.setPassphrase(env, viewer, { passphrase: 'long-enough-1' }), 403, 'viewer passphrase')
   await rejects(access.resetPassphrase(env, admin), 403, 'admin reset')
   console.log('PASS non-managers cannot manage access')
+
+  // Viewing the passphrase
+  await rejects(access.viewPassphrase(env, admin), 403, 'admin view')
+  await rejects(access.viewPassphrase(env, viewer), 403, 'viewer view')
+  assert.equal((await access.viewPassphrase(env, manager)).passphrase, 'deployment-pass')
+  await access.setPassphrase(env, manager, { passphrase: 'My Secret Phrase ✓ 42' })
+  assert.ok(!settingValue.includes('My Secret Phrase'), 'stored value is not plaintext')
+  assert.equal((await access.viewPassphrase(env, manager)).passphrase, 'My Secret Phrase ✓ 42')
+  await rejects(access.viewPassphrase({ ...env, SESSION_SECRET: 'rotated' }, manager), 409, 'wrong key')
+  settingValue = JSON.stringify({ salt: 's', hash: 'h', iter: 1 })
+  await rejects(access.viewPassphrase(env, manager), 409, 'legacy passphrase')
+  settingValue = null
+  console.log('PASS managers can view the passphrase; it is stored encrypted')
 
   // Validation
   await rejects(access.addMember(env, manager, { email: 'not-an-email' }, true), 400, 'bad email')

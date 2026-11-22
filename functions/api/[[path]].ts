@@ -6,6 +6,7 @@ import {
   requireEditor,
   resetPassphrase,
   setPassphrase,
+  viewPassphrase,
 } from '../../server/access'
 import { backup, mutate, overview, preview } from '../../server/moderation'
 import {
@@ -129,6 +130,8 @@ export const onRequest: PagesFunction<Env> = async ({ request, env }) => {
         await removeMember(env, session, await body(), demo)
         return json({ ok: true })
       }
+      if (!post && path === 'admin/passphrase')
+        return json(await viewPassphrase(env, session))
       if (post && path === 'admin/passphrase') {
         await setPassphrase(env, session, await body())
         return json({ ok: true })

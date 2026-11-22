@@ -8,6 +8,58 @@ const list = (value?: string) =>
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean)
 
+const b64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes))
+const unb64 = (text: string) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0))
+async function viewKey(env: Env) {
+  if (!env.SESSION_SECRET) throw new Failure(503, 'Teacher access is not configured.')
+  return crypto.subtle.importKey(
+    'raw',
+    await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('passphrase-view:' + env.SESSION_SECRET),
+    ),
+    'AES-GCM',
+    false,
+    ['encrypt', 'decrypt'],
+  )
+}
+async function seal(env: Env, value: string) {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const enc = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    await viewKey(env),
+    new TextEncoder().encode(value),
+  )
+  return { enc: b64(new Uint8Array(enc)), iv: b64(iv) }
+}
+/** Lets access managers read the active teacher passphrase. */
+export async function viewPassphrase(env: Env, session: AdminSession) {
+  requireManager(session)
+  const stored = await appPassphrase(env)
+  if (!stored) {
+    if (!env.TEACHER_PASSPHRASE)
+      throw new Failure(404, 'No teacher passphrase is set.')
+    return { passphrase: env.TEACHER_PASSPHRASE, source: 'deployment' }
+  }
+  if (!stored.enc || !stored.iv)
+    throw new Failure(
+      409,
+      'This passphrase was saved before viewing was available. Set it again to view it.',
+    )
+  try {
+    const plain = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: unb64(stored.iv) },
+      await viewKey(env),
+      unb64(stored.enc),
+    )
+    return { passphrase: new TextDecoder().decode(plain), source: 'app' }
+  } catch {
+    throw new Failure(
+      409,
+      'The saved passphrase could not be read. Set a new one.',
+    )
+  }
+}
 export function requireManager(session: AdminSession) {
   if (session.role !== 'manager')
     throw new Failure(
@@ -174,7 +226,7 @@ export async function setPassphrase(
       `INSERT INTO settings(key,value,updatedBy,updatedAt) VALUES ('teacher_passphrase',?,?,?)
        ON CONFLICT(key) DO UPDATE SET value=excluded.value,updatedBy=excluded.updatedBy,updatedAt=excluded.updatedAt`,
     ).bind(
-      JSON.stringify({ salt, hash, iter }),
+      JSON.stringify({ salt, hash, iter, ...(await seal(env, value)) }),
       session.email,
       new Date().toISOString(),
     ),
