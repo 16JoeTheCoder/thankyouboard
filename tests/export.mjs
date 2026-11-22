@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import puppeteer from 'puppeteer-core';
@@ -19,7 +19,8 @@ const teacher = 'Ada Chen';
 const notes = fixture().notes.filter((note) => note.teacher === teacher);
 const mixedNote = notes[0];
 const longNote = notes[1];
-const sparse = [notes[0], notes[2], notes[29]];
+let boardOrder;
+let sparse;
 const report = { browser: '', cases: [], checks: [], failures: [] };
 const workspace = 'dialog.ks-dialog[open]';
 const compact = (value) => value.replace(/\s/gu, '');
@@ -101,7 +102,7 @@ async function options(page, layout, size) {
 async function choose(page, expected) {
   await button(inScope(page, workspace), 'Clear');
   for (const note of expected) {
-    const index = notes.indexOf(note);
+    const index = boardOrder.indexOf(note);
     assert(index >= 0);
     await page.click(`${workspace} .ks-list label:nth-child(${index + 1})`);
   }
@@ -154,7 +155,7 @@ async function inspectPdf(file, size, expected, { rendered = true } = {}) {
   const suffix = file.slice(output.length + 1);
   assert.equal(Number(info.match(/^Pages:\s+(\d+)/mu)?.[1]), pages.length, `${suffix} page count`);
   assert.equal(boxes.length, pages.length, `${suffix} word bounding page count`);
-  assert.match(fonts, /\byes\s+yes\s+yes\b/u, `${suffix} uses embedded selectable Unicode fonts`);
+  assert.match(fonts, /\byes\s+(?:no|yes)\s+yes\b/u, `${suffix} uses embedded selectable Unicode fonts`);
   for (const [index, [, width, height, words]] of boxes.entries()) {
     assert(Math.abs(Number(width) - dimensions[size][0] * 72 / 25.4) <= 1, `${suffix} page ${index + 1} width ${width}`);
     assert(Math.abs(Number(height) - dimensions[size][1] * 72 / 25.4) <= 1, `${suffix} page ${index + 1} height ${height}`);
@@ -170,8 +171,13 @@ async function inspectPdf(file, size, expected, { rendered = true } = {}) {
   const raster = file.replace(/\.pdf$/u, '');
   if (rendered) await run('pdftoppm', ['-r', '110', '-f', '1', '-l', '1', '-png', '-singlefile', file, raster]);
   report.cases.push({ artifact: suffix, size, pages: pages.length, notes: expected.length, textMatches: extractedBody === expectedBody });
-  const mismatch = [...expectedBody].findIndex((character, index) => character !== [...extractedBody][index]);
-  assert.equal(extractedBody, expectedBody, `${suffix} exact visible text and selection order after removing whitespace. First differing character: ${mismatch}`);
+  if (extractedBody !== expectedBody) {
+    const actualCharacters = [...extractedBody];
+    const expectedCharacters = [...expectedBody];
+    const mismatch = expectedCharacters.findIndex((character, index) => character !== actualCharacters[index]);
+    const start = Math.max(0, mismatch - 12);
+    throw new Error(`${suffix} exact text mismatch near character ${mismatch}: expected "${expectedCharacters.slice(start, start + 28).join('')}", received "${actualCharacters.slice(start, start + 28).join('')}"`);
+  }
   return pages.length;
 }
 
@@ -192,7 +198,7 @@ async function previewPages(page, expected) {
     await button(scope, 'Previous page');
     await page.waitForFunction((selector, value) => document.querySelector(selector).textContent === value, {}, counter, `Page ${total - 1} of ${total}`);
   }
-  assert.equal(compact(bodies.flat().join('')), expected.map((note) => compact(note.text)).join(''), 'Live SVG retains the selected source text in stable order');
+  assert.equal(bodies.flat().join(''), expected.map((note) => note.text.replace(/\r?\n/gu, '')).join(''), 'Live SVG retains the selected source characters and spaces in stable order');
   return bodies;
 }
 
@@ -241,6 +247,16 @@ async function noteVisibility(admin, note, visible) {
 async function runExport(page) {
   const scope = inScope(page, workspace);
   await unlock(page);
+  const board = await page.evaluate(async () => (await (await fetch('/api/board')).json()).notes);
+  const byId = new Map(notes.map((note) => [note.id, note]));
+  boardOrder = board.filter((note) => note.teacher === teacher).sort((a, b) => a.slot - b.slot).map((note) => {
+    const synthetic = byId.get(note.id);
+    assert.equal(note.text, synthetic?.text, `Board note ${note.id} matches the fixture`);
+    return synthetic;
+  });
+  assert.equal(boardOrder.length, 55);
+  sparse = [boardOrder[0], boardOrder[12], boardOrder[37]];
+  assert(sparse.includes(mixedNote), 'Sparse selection should exercise mixed-script text');
   await openExport(page, true);
   await check('Individual shortcut selects the mixed-script note and defaults to Gallery/A4', async () => {
     assert.deepEqual(await checkedText(page), [mixedNote.text]);
@@ -248,17 +264,23 @@ async function runExport(page) {
     const preview = await previewPages(page, [mixedNote]);
     assert.equal(preview.length, 1);
     const [chinese, english] = mixedNote.text.split('\n');
-    assert(preview[0].some((line) => line.includes(chinese)), 'Preview preserves the Chinese source line');
-    assert(preview[0].some((line) => line.includes(english)), 'Preview preserves the separate English source line');
+    assert(preview[0].some((line) => line === chinese), 'Preview ends the Chinese line at the source line break');
+    assert.equal(preview[0].slice(preview[0].indexOf(chinese) + 1).join(''), english, 'Preview preserves the separate English source line across physical wraps');
     await page.screenshot({ path: join(output, 'individual-workspace.png') });
     await inspectPdf(await waitForDownload(page, 'individual-gallery-a4'), 'A4', [mixedNote]);
+  });
+  await check('Browser print preserves the mixed-script note and the one-page preview', async () => {
+    const preview = await previewPages(page, [mixedNote]);
+    const printed = join(output, 'individual-gallery-a4-print.pdf');
+    await printPdf(page, printed, preview);
+    assert.equal(await inspectPdf(printed, 'A4', [mixedNote]), 1);
   });
   await button(scope, 'Back to notes');
   await button(inScope(page, 'dialog[open]'), `More for ${teacher}`);
   await button(inScope(page, 'dialog[open]'), 'Save my notes');
   await ready(page);
   await check('Teacher workspace defaults to all 55 and has clear/empty/individual selection states', async () => {
-    assert.deepEqual(await checkedText(page), notes.map((note) => note.text));
+    assert.deepEqual(await checkedText(page), boardOrder.map((note) => note.text));
     await button(scope, 'Clear');
     assert.equal((await checkedText(page)).length, 0);
     assert.match(await page.$eval(`${workspace} .ks-stage`, (stage) => stage.textContent), /Select a note/u);
@@ -295,11 +317,11 @@ async function runExport(page) {
   await check('All 55 A6 notes download in stable order with every preview page represented', async () => {
     await button(scope, 'Select all');
     await options(page, 'Blue Ink', 'A6');
-    assert.deepEqual(await checkedText(page), notes.map((note) => note.text));
-    const preview = await previewPages(page, notes);
+    assert.deepEqual(await checkedText(page), boardOrder.map((note) => note.text));
+    const preview = await previewPages(page, boardOrder);
     assert(preview.length > 10, 'All 55 selected notes should fill at least 11 A6 pages');
     const pdf = await waitForDownload(page, 'all-55-blue-ink-a6');
-    assert.equal(await inspectPdf(pdf, 'A6', notes), preview.length);
+    assert.equal(await inspectPdf(pdf, 'A6', boardOrder), preview.length);
   });
 
   await check('Failed export refresh offers a retry and keeps the selection', async () => {
