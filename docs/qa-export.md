@@ -44,3 +44,5 @@ Artifacts are stored outside the repository. Key files in `/tmp/thankyouboard-qa
 - `all-55-blue-ink-a6.pdf`, `all-55-blue-ink-a6-last.png`, `hidden-excluded-gallery-a4.pdf`, and `export-retry.png` show the full selection, final page, moderation, and recovery.
 
 Print used the application Print control, intercepted Chromium's interactive dialog, and generated a PDF through Chromium's print pipeline with CSS paper sizing. Physical printer output and browser engines other than Chromium remain unverified.
+
+The PR includes two synthetic downloads for inspection. [Single mixed-script note on A4](qa/individual-gallery-a4.pdf) · [Long note spanning A6 pages](qa/long-gallery-a6.pdf)
