@@ -33,11 +33,12 @@ The browser checks use Puppeteer's Node API and a local Chromium installation. E
 | Area | Start in a separate terminal | Run the check |
 | --- | --- | --- |
 | Board and motion | `npm run demo` | `npm run qa:board` |
+| Zoom and pan | `npm run demo` | `npm run qa:zoom` |
 | Council and data | `npm run demo -- --port 8792 --state /tmp/stjbs-qa-admin` | `npm run qa:admin` |
 | Keepsakes | `npm run demo -- --port 8793 --state /tmp/stjbs-qa-export` | `npm run qa:export` |
 | Private seed | Creates an isolated local database | `npm run qa:seed` |
 
-Run the performance trace without other browser suites active. The reports cover [board interactions](docs/qa-board.md), [moderation and recovery](docs/qa-admin.md), and [PDF verification](docs/qa-export.md).
+The zoom check drives the wall with mouse, wheel, keyboard, touch and pinch on a desktop and a phone viewport. Run the performance trace without other browser suites active. The reports cover [board interactions](docs/qa-board.md), [moderation and recovery](docs/qa-admin.md), and [PDF verification](docs/qa-export.md).
 
 ![The compiled teacher wall with 500 synthetic notes](docs/qa/wall-desktop.webp)
 

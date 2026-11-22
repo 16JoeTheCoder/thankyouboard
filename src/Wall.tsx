@@ -8,7 +8,12 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { CSSProperties, FormEvent, ReactNode } from 'react'
+import type {
+  CSSProperties,
+  FormEvent,
+  MutableRefObject,
+  ReactNode,
+} from 'react'
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -32,9 +37,23 @@ import {
   Minimize2,
   Palette,
   RotateCcw,
+  Scan,
   Search,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
+import {
+  clampView,
+  fitView,
+  maxZoom,
+  revealRect,
+  sameView,
+  transformFor,
+  zoomAbout,
+  zoomStep,
+} from './boardView'
+import type { BoardView } from './boardView'
 import { wallSlots } from './wallSlots'
 import './wall.css'
 
@@ -328,14 +347,21 @@ function Dedication({ copy, close }: { copy: string; close: () => void }) {
     </main>
   )
 }
-// Rasterize the paper print once per size/theme/data revision. Native buttons
-// retain every slot's geometry and semantics without 500 rotated paint layers.
+// Rasterize the paper print once per size/theme/data revision, and again
+// whenever the zoom or pan changes: the canvas always draws exactly what is
+// visible at the true resolution, so notes stay crisp instead of being a
+// stretched bitmap. Native buttons retain every slot's geometry and semantics
+// without 500 rotated paint layers.
 const PrintedWall = memo(function PrintedWall({
   notes,
   theme,
+  view,
+  drawer,
 }: {
   notes: WallNote[]
   theme: Theme
+  view: MutableRefObject<BoardView>
+  drawer: MutableRefObject<(() => void) | null>
 }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
@@ -343,46 +369,116 @@ const PrintedWall = memo(function PrintedWall({
     const brush = surface.getContext('2d')
     if (!brush) return
     let mounted = true
+    let palettes: string[][] | null = null
+    // Wrapped text per note. Measuring is the slow part, so it is done once per
+    // board width instead of on every pan or zoom frame.
+    let wrapped: { size: number; lines: [string, number][] }[] = []
+    let wrappedFor = 0
+    function wrap(width: number, height: number) {
+      wrappedFor = width
+      wrapped = notes.map((note) => {
+        const slot = wallSlots[note.slot]
+        if (!slot || !slot.excerpt) return { size: 0, lines: [] }
+        const w = Math.max(1, (width * slot.width) / 100 - 0.6),
+          h = Math.max(1, (height * slot.height) / 100 - 0.6)
+        // Small notes get proportionally smaller type so every note carries text.
+        const size = Math.max(
+          2.4,
+          Math.min(8, Math.max(3, width * 0.006), w * 0.2),
+        )
+        brush!.font = 'italic ' + size + 'px "Instrument Serif", Georgia, serif'
+        const lines: [string, number][] = []
+        let line = '',
+          y = h * 0.15
+        for (const word of note.text.slice(0, 56).split(/\s+/)) {
+          const joined = line ? line + ' ' + word : word
+          if (line && brush!.measureText(joined).width > w * 0.76) {
+            lines.push([line, y])
+            y += size
+            line = word
+            if (y >= h * 0.8) break
+          } else line = joined
+        }
+        if (y < h * 0.8) lines.push([line, y])
+        return { size, lines }
+      })
+    }
     function draw() {
       if (!mounted || !brush) return
       const width = surface.clientWidth,
         height = surface.clientHeight
       if (!width || !height) return
       const ratio = Math.min(devicePixelRatio, 2)
-      surface.width = Math.round(width * ratio)
-      surface.height = Math.round(height * ratio)
-      brush.scale(ratio, ratio)
-      const style = getComputedStyle(surface)
-      const palettes = Array.from({ length: 8 }, (_, i) => {
-        const tone = style.getPropertyValue('--p' + i).trim()
-        return [0, 0.13, 0.3, 0.46].map((mix) => {
-          const base = [1, 3, 5].map((at) =>
-            parseInt(tone.slice(at, at + 2), 16),
-          )
-          return (
-            'rgb(' +
-            base
-              .map((v, k) => Math.round(v + ([255, 245, 215][k] - v) * mix))
-              .join(',') +
-            ')'
-          )
+      const pixelsWide = Math.round(width * ratio),
+        pixelsHigh = Math.round(height * ratio)
+      if (surface.width !== pixelsWide || surface.height !== pixelsHigh) {
+        surface.width = pixelsWide
+        surface.height = pixelsHigh
+      }
+      const { s, fx, fy } = view.current
+      brush.setTransform(1, 0, 0, 1, 0, 0)
+      brush.clearRect(0, 0, pixelsWide, pixelsHigh)
+      brush.setTransform(
+        ratio * s,
+        0,
+        0,
+        ratio * s,
+        ratio * fx * width,
+        ratio * fy * height,
+      )
+      if (!palettes) {
+        const style = getComputedStyle(surface)
+        palettes = Array.from({ length: 8 }, (_, i) => {
+          const tone = style.getPropertyValue('--p' + i).trim()
+          return [0, 0.13, 0.3, 0.46].map((mix) => {
+            const base = [1, 3, 5].map((at) =>
+              parseInt(tone.slice(at, at + 2), 16),
+            )
+            return (
+              'rgb(' +
+              base
+                .map((v, k) => Math.round(v + ([255, 245, 215][k] - v) * mix))
+                .join(',') +
+              ')'
+            )
+          })
         })
-      })
-      for (const note of notes) {
+      }
+      if (wrappedFor !== width) wrap(width, height)
+      // The part of the board on screen, in board pixels. Zoomed in, most notes are off screen.
+      const seen =
+        s > 1
+          ? {
+              left: (-fx * width) / s,
+              right: ((1 - fx) * width) / s,
+              top: (-fy * height) / s,
+              bottom: ((1 - fy) * height) / s,
+            }
+          : null
+      notes.forEach((note, index) => {
         const slot = wallSlots[note.slot]
-        if (!slot) continue
+        if (!slot) return
         const w = Math.max(1, (width * slot.width) / 100 - 0.6),
           h = Math.max(1, (height * slot.height) / 100 - 0.6)
+        const x = (width * slot.left) / 100,
+          y = (height * slot.top) / 100
+        if (seen) {
+          const pad = 4 + Math.max(w, h) * 0.3
+          if (
+            x + w + pad < seen.left ||
+            x - pad > seen.right ||
+            y + h + pad < seen.top ||
+            y - pad > seen.bottom
+          )
+            return
+        }
         brush.save()
-        brush.translate(
-          (width * slot.left) / 100 + w / 2,
-          (height * slot.top) / 100 + h / 2,
-        )
+        brush.translate(x + w / 2, y + h / 2)
         brush.rotate((slot.tilt * Math.PI) / 180)
         brush.translate(-w / 2, -h / 2)
         brush.fillStyle = '#69574640'
         brush.fillRect(0.8, 1.4, w, h)
-        brush.fillStyle = palettes[slot.letter][slot.variant]
+        brush.fillStyle = palettes![slot.letter][slot.variant]
         brush.fillRect(0, 0, w, h)
         brush.strokeStyle = '#68564b2b'
         brush.lineWidth = 0.6
@@ -397,44 +493,33 @@ const PrintedWall = memo(function PrintedWall({
           brush.lineTo(w, h - w * 0.17)
           brush.fill()
         }
-        if (slot.excerpt) {
-          // Small notes get proportionally smaller type so every note carries text.
-          const fontSize = Math.max(
-            2.4,
-            Math.min(8, Math.max(3, width * 0.006), w * 0.2),
-          )
+        const text = wrapped[index]
+        if (slot.excerpt && text) {
           brush.beginPath()
           brush.rect(w * 0.12, h * 0.1, w * 0.77, h * 0.72)
           brush.clip()
           brush.font =
-            'italic ' + fontSize + 'px "Instrument Serif", Georgia, serif'
+            'italic ' + text.size + 'px "Instrument Serif", Georgia, serif'
           brush.fillStyle = '#382d29'
           brush.textBaseline = 'top'
-          const words = note.text.slice(0, 56).split(/\s+/)
-          let line = '',
-            y = h * 0.15
-          for (const word of words) {
-            const joined = line ? line + ' ' + word : word
-            if (line && brush.measureText(joined).width > w * 0.76) {
-              brush.fillText(line, w * 0.12, y)
-              y += fontSize
-              line = word
-              if (y >= h * 0.8) break
-            } else line = joined
-          }
-          if (y < h * 0.8) brush.fillText(line, w * 0.12, y)
+          for (const [line, at] of text.lines) brush.fillText(line, w * 0.12, at)
         }
         brush.restore()
-      }
+      })
     }
+    drawer.current = draw
     const observer = new ResizeObserver(draw)
     observer.observe(surface)
-    void document.fonts.ready.then(draw)
+    void document.fonts.ready.then(() => {
+      wrappedFor = 0
+      draw()
+    })
     return () => {
       mounted = false
+      if (drawer.current === draw) drawer.current = null
       observer.disconnect()
     }
-  }, [notes, theme])
+  }, [notes, theme, view, drawer])
   return <canvas className="printed-wall" ref={canvas} aria-hidden="true" />
 })
 const Cards = memo(function Cards({
@@ -538,6 +623,10 @@ function BoardArt({
   )
   const lifted = useRef<HTMLDivElement>(null)
   const preview = useRef<HTMLDivElement>(null)
+  const pan = useRef<HTMLDivElement>(null)
+  const view = useRef<BoardView>(fitView)
+  const drawBoard = useRef<(() => void) | null>(null)
+  const [percent, setPercent] = useState(100)
   const size = useRef({ width: 0, height: 0 })
   const current = useRef<WallNote | undefined>(undefined)
   const reveal = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -575,6 +664,231 @@ function BoardArt({
       window.removeEventListener('blur', clear)
     }
   }, [clear])
+  // --- Zoom and pan ---------------------------------------------------------
+  // The view lives in a ref and is painted once per animation frame: the pan
+  // layer is moved with a CSS transform and the canvas is redrawn to match, so
+  // gestures never wait on a React render.
+  const frameId = useRef(0)
+  const tween = useRef(0)
+  // Where a running glide is heading, so quick repeated steps build on it.
+  const heading = useRef<BoardView | null>(null)
+  const flush = useCallback(() => {
+    cancelAnimationFrame(frameId.current)
+    frameId.current = 0
+    const frame = board.current,
+      layer = pan.current
+    if (!frame || !layer) return
+    const v = view.current
+    layer.style.transform = transformFor(v)
+    layer.style.setProperty('--inv', String(1 / v.s))
+    frame.toggleAttribute('data-zoomed', v.s > 1)
+    drawBoard.current?.()
+    setPercent(Math.round(v.s * 100))
+  }, [])
+  const setView = useCallback(
+    (next: BoardView) => {
+      const v = clampView(next)
+      if (sameView(v, view.current)) return
+      view.current = v
+      clear()
+      if (!frameId.current) frameId.current = requestAnimationFrame(flush)
+    },
+    [clear, flush],
+  )
+  const stopTween = useCallback(() => {
+    cancelAnimationFrame(tween.current)
+    tween.current = 0
+    heading.current = null
+  }, [])
+  /** Eases to a new view (instant for people who prefer reduced motion). */
+  const glide = useCallback(
+    (target: BoardView) => {
+      stopTween()
+      const goal = clampView(target)
+      const from = view.current
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        setView(goal)
+        return
+      }
+      heading.current = goal
+      const began = performance.now()
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - began) / 180)
+        const e = 1 - Math.pow(1 - t, 3)
+        setView({
+          s: from.s + (goal.s - from.s) * e,
+          fx: from.fx + (goal.fx - from.fx) * e,
+          fy: from.fy + (goal.fy - from.fy) * e,
+        })
+        flush()
+        if (t < 1) tween.current = requestAnimationFrame(tick)
+        else {
+          tween.current = 0
+          heading.current = null
+        }
+      }
+      tween.current = requestAnimationFrame(tick)
+    },
+    [setView, stopTween, flush],
+  )
+  const zoomBy = useCallback(
+    (factor: number) => {
+      const v = heading.current ?? view.current
+      glide(zoomAbout(v, v.s * factor, 0.5, 0.5))
+    },
+    [glide],
+  )
+  const resetView = useCallback(() => glide(fitView), [glide])
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(frameId.current)
+      cancelAnimationFrame(tween.current)
+    },
+    [],
+  )
+  /** Pointer position on the board in board pixels, correct at any zoom. */
+  const local = useCallback((event: MouseEvent): [number, number] => {
+    const plane = hitPlane.current!
+    if (!board.current?.hasAttribute('data-zoomed'))
+      return [event.offsetX, event.offsetY]
+    const box = plane.getBoundingClientRect()
+    const k = box.width / (size.current.width || 1)
+    return [(event.clientX - box.left) / k, (event.clientY - box.top) / k]
+  }, [])
+  useEffect(() => {
+    const frame = board.current!
+    const touches = new Map<number, { x: number; y: number }>()
+    let drag: { id: number; x: number; y: number; moving: boolean } | null =
+      null
+    let pinch: { span: number; cx: number; cy: number; view: BoardView } | null =
+      null
+    let swallow = false
+    const middle = () => {
+      const [a, b] = Array.from(touches.values())
+      const box = frame.getBoundingClientRect()
+      return {
+        span: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+        cx: ((a.x + b.x) / 2 - box.left) / box.width,
+        cy: ((a.y + b.y) / 2 - box.top) / box.height,
+      }
+    }
+    const grab = (id: number) => {
+      try {
+        frame.setPointerCapture(id)
+      } catch {
+        /* the pointer is already gone */
+      }
+    }
+    const down = (e: PointerEvent) => {
+      swallow = false
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      if (touches.size >= 2) return
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (touches.size === 2) {
+        stopTween()
+        pinch = { ...middle(), view: view.current }
+        drag = null
+        swallow = true
+        clear()
+        for (const id of touches.keys()) grab(id)
+      } else
+        drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moving: false }
+    }
+    const move = (e: PointerEvent) => {
+      const point = touches.get(e.pointerId)
+      if (!point) return
+      point.x = e.clientX
+      point.y = e.clientY
+      if (pinch && touches.size === 2) {
+        const now = middle()
+        const scale = Math.min(
+          maxZoom,
+          Math.max(1, (pinch.view.s * now.span) / pinch.span),
+        )
+        // The board point that started under the fingers stays under them.
+        const bx = (pinch.cx - pinch.view.fx) / pinch.view.s,
+          by = (pinch.cy - pinch.view.fy) / pinch.view.s
+        setView({ s: scale, fx: now.cx - bx * scale, fy: now.cy - by * scale })
+        return
+      }
+      if (!drag || drag.id !== e.pointerId || view.current.s <= 1) return
+      const dx = e.clientX - drag.x,
+        dy = e.clientY - drag.y
+      if (!drag.moving) {
+        // A small wobble while tapping a note must not turn into a drag.
+        if (Math.hypot(dx, dy) < (e.pointerType === 'mouse' ? 4 : 9)) return
+        drag.moving = true
+        swallow = true
+        stopTween()
+        grab(e.pointerId)
+        frame.toggleAttribute('data-panning', true)
+      }
+      const box = frame.getBoundingClientRect(),
+        v = view.current
+      setView({ s: v.s, fx: v.fx + dx / box.width, fy: v.fy + dy / box.height })
+      drag.x = e.clientX
+      drag.y = e.clientY
+    }
+    const up = (e: PointerEvent) => {
+      if (!touches.delete(e.pointerId)) return
+      if (pinch && touches.size < 2) {
+        pinch = null
+        const rest = Array.from(touches.entries())[0]
+        // The finger left behind carries on panning without a jump.
+        drag = rest
+          ? { id: rest[0], x: rest[1].x, y: rest[1].y, moving: true }
+          : null
+      } else if (drag?.id === e.pointerId) drag = null
+      if (!touches.size) frame.toggleAttribute('data-panning', false)
+      try {
+        frame.releasePointerCapture(e.pointerId)
+      } catch {
+        /* not captured */
+      }
+    }
+    // A drag that ends on a note must not also open it.
+    const click = (e: MouseEvent) => {
+      if (!swallow) return
+      swallow = false
+      e.stopPropagation()
+      e.preventDefault()
+    }
+    const wheel = (e: WheelEvent) => {
+      // Pinch on a trackpad arrives as ctrl + wheel. In full screen there is no
+      // page to scroll, so a plain wheel zooms too.
+      if (!(e.ctrlKey || e.metaKey || document.fullscreenElement)) return
+      if (!e.deltaY) return
+      e.preventDefault()
+      stopTween()
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 120 : 1
+      const delta = Math.max(-30, Math.min(30, e.deltaY * unit))
+      const box = frame.getBoundingClientRect()
+      const v = view.current
+      setView(
+        zoomAbout(
+          v,
+          v.s * Math.exp(-delta * 0.01),
+          (e.clientX - box.left) / box.width,
+          (e.clientY - box.top) / box.height,
+        ),
+      )
+    }
+    frame.addEventListener('pointerdown', down)
+    // Captured so a drag is seen even while the hover layer is under the pointer.
+    frame.addEventListener('pointermove', move, true)
+    frame.addEventListener('pointerup', up)
+    frame.addEventListener('pointercancel', up)
+    frame.addEventListener('click', click, true)
+    frame.addEventListener('wheel', wheel, { passive: false })
+    return () => {
+      frame.removeEventListener('pointerdown', down)
+      frame.removeEventListener('pointermove', move, true)
+      frame.removeEventListener('pointerup', up)
+      frame.removeEventListener('pointercancel', up)
+      frame.removeEventListener('click', click, true)
+      frame.removeEventListener('wheel', wheel)
+    }
+  }, [clear, setView, stopTween])
   const activate = useCallback(
     (note: WallNote | undefined, immediate = false) => {
       if (note === current.current && (!immediate || !preview.current?.hidden))
@@ -607,10 +921,22 @@ function BoardArt({
         }
         previewEl.firstElementChild!.textContent = note.teacher
         previewEl.lastElementChild!.textContent = note.text.slice(0, 200)
+        // Zoomed in, keep the preview inside the part of the wall on screen.
+        const { s, fx, fy } = view.current
+        const half = 85 / s
+        const seenLeft = (-fx * width) / s,
+          seenRight = ((1 - fx) * width) / s
+        const seenTop = (-fy * height) / s
+        const below = s > 1 ? (y - seenTop) * s < 86 : slot!.top < 22
         previewEl.style.left =
-          Math.max(85, Math.min(width - 85, x + w / 2)) + 'px'
-        previewEl.style.top = (slot!.top < 22 ? y + h + 4 : y - 4) + 'px'
-        previewEl.classList.toggle('peek-below', slot!.top < 22)
+          (s > 1
+            ? Math.max(
+                seenLeft + half,
+                Math.min(seenRight - half, x + w / 2),
+              )
+            : Math.max(85, Math.min(width - 85, x + w / 2))) + 'px'
+        previewEl.style.top = (below ? y + h + 4 / s : y - 4 / s) + 'px'
+        previewEl.classList.toggle('peek-below', below)
         previewEl.hidden = false
         reveal.current = null
       }
@@ -649,7 +975,7 @@ function BoardArt({
     const move = (event: PointerEvent) => {
       event.stopPropagation()
       if (event.pointerType === 'touch') return
-      const note = hit(event.offsetX, event.offsetY)
+      const note = hit(...local(event))
       if (note === current.current) return
       if (note) {
         surface.dataset.slot = String(note.slot)
@@ -675,21 +1001,26 @@ function BoardArt({
       surface.removeEventListener('pointerleave', leave)
       leave()
     }
-  }, [activate, clear, hit])
+  }, [activate, clear, hit, local])
   return (
     <div className="mat-board">
       <div
         ref={board}
         className={'paper-board' + (spot ? ' spotlight' : '')}
         aria-label="Thank you wall of student notes"
-        onFocus={(e) =>
-          activate(byId.get((e.target as HTMLElement).dataset.id || ''), true)
-        }
+        onFocus={(e) => {
+          const note = byId.get((e.target as HTMLElement).dataset.id || '')
+          // Keyboard users moving between notes must never lose the focused one off screen.
+          const slot = note && wallSlots[note.slot]
+          if (slot && (e.target as HTMLElement).matches(':focus-visible'))
+            setView(revealRect(view.current, slot))
+          activate(note, true)
+        }}
         onBlur={clear}
         onClick={(e) => {
           const id =
             e.target === hitPlane.current
-              ? hit(e.nativeEvent.offsetX, e.nativeEvent.offsetY)?.id
+              ? hit(...local(e.nativeEvent))?.id
               : (e.target as Element).closest<HTMLElement>('button[data-id]')
                   ?.dataset.id
           if (id) {
@@ -701,6 +1032,22 @@ function BoardArt({
           if (e.key === 'Escape') {
             clear()
             return
+          }
+          if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+            const zoom =
+              e.key === '+' || e.key === '='
+                ? zoomStep
+                : e.key === '-' || e.key === '_'
+                  ? 1 / zoomStep
+                  : e.key === '0'
+                    ? 0
+                    : null
+            if (zoom !== null) {
+              e.preventDefault()
+              if (zoom) zoomBy(zoom)
+              else resetView()
+              return
+            }
           }
           if (
             ![
@@ -740,30 +1087,75 @@ function BoardArt({
           tiles[next].focus({ preventScroll: true })
         }}
       >
-        <PrintedWall notes={notes} theme={theme} />
-        <div className="paper-base">
-          <Cards notes={notes} spot={spot} />
-        </div>
-        <span aria-hidden="true" className="board-postmark">
-          <Mail />
-          <i />
-        </span>
-        <span className="board-sign" aria-hidden="true">
-          With gratitude,
-          <br /> <em>STJBS students</em>
-        </span>
-        <div ref={hitPlane} className="paper-hit-plane" aria-hidden="true" />
-        <div className="paper-hover-plane" aria-hidden="true">
-          <div ref={lifted} hidden>
-            <span className="paper-face">
+        <PrintedWall
+          notes={notes}
+          theme={theme}
+          view={view}
+          drawer={drawBoard}
+        />
+        <div ref={pan} className="board-pan">
+          <div className="paper-base">
+            <Cards notes={notes} spot={spot} />
+          </div>
+          <span aria-hidden="true" className="board-postmark">
+            <Mail />
+            <i />
+          </span>
+          <span className="board-sign" aria-hidden="true">
+            With gratitude,
+            <br /> <em>STJBS students</em>
+          </span>
+          <div ref={hitPlane} className="paper-hit-plane" aria-hidden="true" />
+          <div className="paper-hover-plane" aria-hidden="true">
+            <div ref={lifted} hidden>
+              <span className="paper-face">
+                <span />
+              </span>
+            </div>
+            <div className="paper-peek" ref={preview} hidden>
+              <strong />
               <span />
-            </span>
-          </div>
-          <div className="paper-peek" ref={preview} hidden>
-            <strong />
-            <span />
+            </div>
           </div>
         </div>
+      </div>
+      <div
+        className="board-zoom"
+        role="group"
+        aria-label="Zoom the wall"
+        data-fit={percent <= 100 ? '' : undefined}
+      >
+        {/* Zoom in stays rightmost: the group grows leftward, so a second quick tap never lands on another control. */}
+        <button
+          type="button"
+          aria-label="Fit the whole wall"
+          title="Fit the whole wall (0)"
+          aria-disabled={percent <= 100}
+          onClick={resetView}
+        >
+          <Scan size={18} />
+        </button>
+        <button
+          type="button"
+          aria-label="Zoom out"
+          title="Zoom out (−)"
+          aria-disabled={percent <= 100}
+          onClick={() => zoomBy(1 / zoomStep)}
+        >
+          <ZoomOut size={18} />
+        </button>
+        <output aria-live="polite" aria-label="Zoom level">
+          {percent}%
+        </output>
+        <button
+          type="button"
+          aria-label="Zoom in"
+          title="Zoom in (+)"
+          aria-disabled={percent >= maxZoom * 100}
+          onClick={() => zoomBy(zoomStep)}
+        >
+          <ZoomIn size={18} />
+        </button>
       </div>
     </div>
   )
