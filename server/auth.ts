@@ -91,6 +91,9 @@ export interface StoredPassphrase {
   salt: string
   hash: string
   iter: number
+  /** AES-GCM copy (base64) so access managers can view it; absent for passphrases saved before viewing existed. */
+  enc?: string
+  iv?: string
 }
 const hex = (bytes: ArrayBuffer | Uint8Array) =>
   Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join(

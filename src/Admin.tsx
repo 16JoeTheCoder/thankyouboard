@@ -1324,7 +1324,9 @@ function Access({
     [pass, setPass] = useState(''),
     [passError, setPassError] = useState(''),
     [passConfirm, setPassConfirm] = useState<'set' | 'reset' | ''>(''),
-    [shown, setShown] = useState('')
+    [shown, setShown] = useState(''),
+    [revealed, setRevealed] = useState(''),
+    [revealError, setRevealError] = useState('')
   const url = new URL('/', location.origin).href
   const manager = info?.role === 'manager'
   const readOnly = (data.role || info?.role) === 'viewer'
@@ -1424,9 +1426,19 @@ function Access({
       setBusy(false)
     }
   }
+  async function reveal() {
+    setRevealError('')
+    try {
+      setRevealed((await api<{ passphrase: string }>('/api/admin/passphrase')).passphrase)
+    } catch (err) {
+      setRevealError(emptyMessage(err))
+    }
+  }
   async function savePassphrase() {
     setBusy(true)
     setPassError('')
+    setRevealed('')
+    setRevealError('')
     try {
       if (passConfirm === 'reset') {
         await api('/api/admin/passphrase/reset', {})
@@ -1500,9 +1512,38 @@ function Access({
                     (info.passphrase.updatedAt
                       ? ', ' + time(info.passphrase.updatedAt)
                       : '') +
-                    '. It is stored securely and cannot be read back.'
+                    '. It is stored encrypted and only access managers can view it.'
                   : 'Using the passphrase configured at deployment.'}
               </p>
+              <div className="adm-actions">
+                <button
+                  onClick={() =>
+                    revealed ? setRevealed('') : void reveal()
+                  }
+                >
+                  {revealed ? 'Hide passphrase' : 'View passphrase'}
+                </button>
+              </div>
+              {revealed && (
+                <p className="adm-identity" role="status">
+                  <span>
+                    <small>Current teacher passphrase</small>
+                    <strong>{revealed}</strong>
+                  </span>
+                  <button
+                    onClick={() =>
+                      navigator.clipboard
+                        .writeText(revealed)
+                        .then(() => notify('Passphrase copied.'))
+                        .catch(() => {})
+                    }
+                  >
+                    <Icon name="copy" />
+                    Copy
+                  </button>
+                </p>
+              )}
+              <StateError message={revealError} />
               {shown && (
                 <p className="adm-identity" role="status">
                   <span>
