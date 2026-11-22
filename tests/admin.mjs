@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
-import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import puppeteer from 'puppeteer-core'
+import { fixture } from '../scripts/fixture.mjs'
 
 const origin = new URL(process.env.ADMIN_QA_URL ?? 'http://127.0.0.1:8792')
 assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname), 'Use an isolated local demo URL for the mutating admin QA pass')
@@ -179,11 +180,19 @@ await check('synthetic seed has 500 stable slots and private board responses', a
   assertRejected(await anonymous.request('/api/board', { headers: { 'if-none-match': etag } }), 'conditional read without authorization')
   assert.equal(originalBackup.version, 1)
   assert.equal(originalBackup.notes.length, 500)
-  await filesContainNone(resolve('dist'), [
-    ['synthetic sample note', coverageNote.text.slice(0, 42)],
-    ['synthetic sample note', secondNote.text.slice(0, 42)],
-    ['demo passphrase', demoPassphrase],
-  ])
+  const fixtureNotes = fixture().notes
+  for (const expected of fixtureNotes) {
+    const actual = noteById(initialBoard.data, expected.id)
+    assert.ok(actual.teacher === expected.teacher && actual.text === expected.text, `Seed changed synthetic note ${expected.id}`)
+  }
+  const markers = [...new Set(fixtureNotes.map(note => note.text.slice(0, 45)))].map(text => ['synthetic note excerpt', text])
+  markers.push(['demo passphrase', demoPassphrase])
+  await filesContainNone(resolve('dist'), markers)
+  for (const path of ['/scripts/fixture.mjs', '/migrations/0001_wall.sql', '/.dev.vars']) {
+    const { data } = await anonymous.request(path)
+    const served = typeof data === 'string' ? data : JSON.stringify(data)
+    for (const [label, marker] of markers) assert.ok(!served.includes(marker), `${label} served by ${path}`)
+  }
 })
 
 let visibleRevision
@@ -479,6 +488,7 @@ await check('browser refresh evicts a hidden open note and removes it from teach
   await cardElement.click()
   await visibleText(page, 'dialog[open], [role="dialog"]', current.text)
   assertAccepted(await writeNote(current, { visible: false }), 'hide active reader note')
+  const hidden = [current]
   try {
     const refresh = page.waitForResponse(response => new URL(response.url()).pathname === '/api/board' && response.status() === 200)
     await page.evaluate(() => window.dispatchEvent(new Event('focus')))
@@ -498,12 +508,20 @@ await check('browser refresh evicts a hidden open note and removes it from teach
     assert.equal(await page.$$eval('.ks-list input[type="checkbox"]', inputs => inputs.length), 2)
     assert.ok(!await page.$eval('.ks-list', (list, text) => list.textContent.includes(text), current.text))
     await page.screenshot({ path: resolve(artifacts, 'export-after-hide.png') })
+    const inExport = (await adminState()).notes.find(note => note.visible && note.teacher === current.teacher)
+    assertAccepted(await writeNote(inExport, { visible: false }), 'hide a note while its export is open')
+    hidden.push(inExport)
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await page.waitForFunction(() => document.querySelectorAll('.ks-dialog[open] .ks-list input[type="checkbox"]').length === 1)
+    assert.ok(!await page.$eval('.ks-list', (list, text) => list.textContent.includes(text), inExport.text))
   } finally {
     const state = await adminState()
-    const hide = state.history.find(record => record.noteId === current.id)
-    assertAccepted(await changed('/api/admin/revision', {
-      requestId: requestId(), id: current.id, expectedRevision: hide.after.revision, historyId: hide.id, side: 'before',
-    }), 'restore the note after browser propagation test')
+    for (const note of hidden) {
+      const hide = state.history.find(record => record.noteId === note.id)
+      assertAccepted(await changed('/api/admin/revision', {
+        requestId: requestId(), id: note.id, expectedRevision: hide.after.revision, historyId: hide.id, side: 'before',
+      }), 'restore the note after browser propagation test')
+    }
   }
   await page.close()
 }))
