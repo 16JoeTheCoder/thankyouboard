@@ -7,9 +7,11 @@ import '@fontsource/instrument-serif/latin-400.css'
 import '@fontsource/instrument-serif/latin-400-italic.css'
 import './base.css'
 
-const Surface = /^\/admin(?:\/|$)/.test(location.pathname)
-  ? lazy(() => import('./Admin'))
-  : lazy(() => import('./Wall'))
+const Surface =
+  /^\/admin(?:\/|$)/.test(location.pathname) &&
+  !/^\/admin\/wall(?:\/|$)/.test(location.pathname)
+    ? lazy(() => import('./Admin'))
+    : lazy(() => import('./Wall'))
 
 createRoot(document.getElementById('root')!).render(
   <Suspense

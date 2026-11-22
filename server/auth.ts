@@ -11,7 +11,40 @@ function deployment(request: Request, env: Env) {
   )
     throw new Failure(403, 'Open the wall at its configured school address.')
 }
+export type Role = 'manager' | 'admin' | 'viewer'
+export interface AdminSession {
+  email: string
+  role: Role
+}
+const list = (value?: string) =>
+  (value || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+async function roleFor(env: Env, email: string): Promise<Role | null> {
+  const mail = email.toLowerCase()
+  const admins = list(env.ADMIN_EMAILS)
+  if (admins.includes(mail))
+    return list(env.ACCESS_MANAGERS).includes(mail) ? 'manager' : 'admin'
+  try {
+    if (
+      await env.DB.prepare('SELECT 1 FROM council_members WHERE email=?')
+        .bind(mail)
+        .first()
+    )
+      return 'viewer'
+  } catch {
+    /* Before migration 0003 only the configured administrators have access. */
+  }
+  return null
+}
 export async function adminIdentity(request: Request, env: Env) {
+  return (await adminSession(request, env)).email
+}
+export async function adminSession(
+  request: Request,
+  env: Env,
+): Promise<AdminSession> {
   deployment(request, env)
   if (isDemo(request, env)) {
     if (
@@ -19,7 +52,7 @@ export async function adminIdentity(request: Request, env: Env) {
       cookie(request, 'demo_admin') ===
         (await digest('demo-admin:' + env.SESSION_SECRET))
     )
-      return 'council@example.invalid'
+      return { email: 'council@example.invalid', role: 'manager' }
     throw new Failure(401, 'Enter the local council demo to continue.')
   }
   const issuer = env.ACCESS_ISSUER
@@ -45,24 +78,77 @@ export async function adminIdentity(request: Request, env: Env) {
       algorithms: ['RS256'],
       requiredClaims: ['exp', 'email', 'sub'],
     })
-    if (
-      typeof payload.email === 'string' &&
-      env.ADMIN_EMAILS.split(',')
-        .map((e) => e.trim().toLowerCase())
-        .includes(payload.email.toLowerCase())
-    )
-      return payload.email.toLowerCase()
+    if (typeof payload.email === 'string') {
+      const role = await roleFor(env, payload.email)
+      if (role) return { email: payload.email.toLowerCase(), role }
+    }
   } catch {
     /* Present the same public error for all invalid assertions. */
   }
   throw new Failure(403, 'This account does not have council access.')
 }
-async function sessionKey(request: Request, env: Env, token: string) {
+export interface StoredPassphrase {
+  salt: string
+  hash: string
+  iter: number
+}
+const hex = (bytes: ArrayBuffer | Uint8Array) =>
+  Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join(
+    '',
+  )
+export async function hashPassphrase(
+  passphrase: string,
+  salt: string,
+  iter: number,
+) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(passphrase),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  )
+  return hex(
+    await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        hash: 'SHA-256',
+        salt: new TextEncoder().encode(salt),
+        iterations: iter,
+      },
+      key,
+      256,
+    ),
+  )
+}
+/** The passphrase chosen in the Access view, if any. Without one the deployment secret applies. */
+export async function appPassphrase(
+  env: Env,
+): Promise<StoredPassphrase | null> {
+  try {
+    const value = await env.DB.prepare(
+      "SELECT value FROM settings WHERE key='teacher_passphrase'",
+    ).first<string>('value')
+    return value ? (JSON.parse(value) as StoredPassphrase) : null
+  } catch {
+    return null // Before migration 0003 the deployment secret remains in force.
+  }
+}
+async function sessionKey(
+  request: Request,
+  env: Env,
+  token: string,
+  stored: StoredPassphrase | null,
+) {
   deployment(request, env)
-  if (!env.SESSION_SECRET || !env.TEACHER_PASSPHRASE)
+  if (!env.SESSION_SECRET || (!stored && !env.TEACHER_PASSPHRASE))
     throw new Failure(503, 'Teacher access is not configured.')
   return digest(
-    JSON.stringify([env.SESSION_SECRET, env.TEACHER_PASSPHRASE, token]),
+    JSON.stringify([
+      env.SESSION_SECRET,
+      stored ? 'app:' + stored.hash : env.TEACHER_PASSPHRASE,
+      token,
+    ]),
   )
 }
 export async function teacher(request: Request, env: Env) {
@@ -72,12 +158,16 @@ export async function teacher(request: Request, env: Env) {
   return !!(await env.DB.prepare(
     'SELECT 1 FROM sessions WHERE token=? AND expires>?',
   )
-    .bind(await sessionKey(request, env, token), now())
+    .bind(
+      await sessionKey(request, env, token, await appPassphrase(env)),
+      now(),
+    )
     .first())
 }
 export async function unlock(request: Request, env: Env, passphrase: unknown) {
-  const token = crypto.randomUUID() + crypto.randomUUID(),
-    key = await sessionKey(request, env, token)
+  const stored = await appPassphrase(env),
+    token = crypto.randomUUID() + crypto.randomUUID(),
+    key = await sessionKey(request, env, token, stored)
   const ip = await digest(
     env.SESSION_SECRET +
       ':' +
@@ -97,7 +187,11 @@ export async function unlock(request: Request, env: Env, passphrase: unknown) {
     throw new Failure(429, 'Too many attempts. Try again in ten minutes.')
   if (
     typeof passphrase !== 'string' ||
-    (await digest(passphrase)) !== (await digest(env.TEACHER_PASSPHRASE!))
+    passphrase.length > 200 ||
+    (stored
+      ? (await hashPassphrase(passphrase, stored.salt, stored.iter)) !==
+        stored.hash
+      : (await digest(passphrase)) !== (await digest(env.TEACHER_PASSPHRASE!)))
   )
     throw new Failure(401, 'That passphrase did not match. Please try again.')
   await env.DB.batch([
@@ -111,7 +205,14 @@ export async function unlock(request: Request, env: Env, passphrase: unknown) {
 }
 export async function logout(request: Request, env: Env) {
   await env.DB.prepare('DELETE FROM sessions WHERE token=?')
-    .bind(await sessionKey(request, env, cookie(request, 'wall_session')))
+    .bind(
+      await sessionKey(
+        request,
+        env,
+        cookie(request, 'wall_session'),
+        await appPassphrase(env),
+      ),
+    )
     .run()
   return makeCookie(request, env, 'wall_session', '', 0)
 }

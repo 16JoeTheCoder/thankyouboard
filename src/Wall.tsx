@@ -37,6 +37,10 @@ import { wallSlots } from './wallSlots'
 import './wall.css'
 
 const Export = lazy(() => import('./Export'))
+/** Council members preview the wall from the admin area without the teacher passphrase. */
+const council = /^\/admin\/wall(?:\/|$)/.test(location.pathname)
+const sessionUrl = council ? '/api/admin/wall-session' : '/api/session'
+const boardUrl = council ? '/api/admin/board' : '/api/board'
 export type WallNote = {
   id: string
   teacher: string
@@ -1064,7 +1068,7 @@ export default function Wall() {
   const loadSession = useCallback(async () => {
     setFailure('')
     try {
-      const r = await fetch('/api/session', { cache: 'no-store' })
+      const r = await fetch(sessionUrl, { cache: 'no-store' })
       if (!r.ok) throw new Error(await apiError(r))
       const s: Session = await r.json()
       setSession(s)
@@ -1083,7 +1087,7 @@ export default function Wall() {
     const version = epoch.current
     const request = (async () => {
       try {
-        const r = await fetch('/api/board', {
+        const r = await fetch(boardUrl, {
           cache: 'no-store',
           headers: cache.current.etag
             ? { 'If-None-Match': cache.current.etag }

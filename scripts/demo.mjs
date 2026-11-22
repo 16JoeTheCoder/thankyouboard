@@ -36,10 +36,17 @@ process.env.WRANGLER_SEND_METRICS = 'false'
 process.env.XDG_CONFIG_HOME = join(state, 'config')
 // Pages discovers its project configuration from ancestor paths. Keep the launcher
 // outside the production checkout, even when persistent D1 state lives inside it.
-const project = mkdtempSync(join(tmpdir(), 'stjbs-demo-project-'))
+const project = mkdtempSync(
+  join(realpathSync.native(tmpdir()), 'stjbs-demo-project-'),
+)
 process.on('exit', () => rmSync(project, { recursive: true, force: true }))
 const config = join(project, 'wrangler.jsonc')
-symlinkSync(realpathSync('functions'), join(project, 'functions'), 'dir')
+// Windows needs a junction because directory symlinks require elevated rights.
+symlinkSync(
+  realpathSync('functions'),
+  join(project, 'functions'),
+  process.platform === 'win32' ? 'junction' : 'dir',
+)
 writeFileSync(
   config,
   JSON.stringify({

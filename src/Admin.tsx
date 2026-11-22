@@ -28,6 +28,7 @@ type Change = {
 }
 type Data = {
   identity: string
+  role?: 'manager' | 'admin' | 'viewer'
   demo: boolean
   revision: number
   notes: Note[]
@@ -1275,6 +1276,33 @@ function Backup({
     </>
   )
 }
+type AccessInfo = {
+  role: 'manager' | 'admin' | 'viewer'
+  email: string
+  managers?: string[]
+  admins?: string[]
+  members?: { email: string; addedBy: string; addedAt: string }[]
+  passphrase?: { source: 'app' | 'deployment'; updatedBy?: string; updatedAt?: string }
+  sync?: boolean
+}
+const passphraseAlphabet = 'abcdefghjkmnpqrstuvwxyz23456789'
+function generatePassphrase() {
+  const bytes = crypto.getRandomValues(new Uint8Array(12))
+  return Array.from(
+    bytes,
+    (b) => passphraseAlphabet[b % passphraseAlphabet.length],
+  ).join('')
+}
+function saveBlob(blob: Blob, name: string) {
+  const href = URL.createObjectURL(blob),
+    a = document.createElement('a')
+  a.href = href
+  a.download = name
+  document.body.append(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(href), 2000)
+}
 function Access({
   data,
   mutate,
@@ -1287,8 +1315,30 @@ function Access({
   const [confirm, setConfirm] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [qr, setQr] = useState('')
+    [qr, setQr] = useState(''),
+    [info, setInfo] = useState<AccessInfo | null>(null),
+    [infoError, setInfoError] = useState(''),
+    [newEmail, setNewEmail] = useState(''),
+    [memberError, setMemberError] = useState(''),
+    [removing, setRemoving] = useState(''),
+    [pass, setPass] = useState(''),
+    [passError, setPassError] = useState(''),
+    [passConfirm, setPassConfirm] = useState<'set' | 'reset' | ''>(''),
+    [shown, setShown] = useState('')
   const url = new URL('/', location.origin).href
+  const manager = info?.role === 'manager'
+  const readOnly = (data.role || info?.role) === 'viewer'
+  const loadInfo = useCallback(async () => {
+    try {
+      setInfo(await api<AccessInfo>('/api/admin/access'))
+      setInfoError('')
+    } catch (err) {
+      setInfoError(emptyMessage(err))
+    }
+  }, [])
+  useEffect(() => {
+    void loadInfo()
+  }, [loadInfo])
   useEffect(() => {
     let live = true
     import('qrcode')
@@ -1307,6 +1357,32 @@ function Access({
       live = false
     }
   }, [url])
+  async function downloadQr(kind: 'svg' | 'png') {
+    setError('')
+    try {
+      const lib = await import('qrcode'),
+        options = { margin: 4, color: { dark: '#173d32', light: '#ffffff' } }
+      if (kind === 'svg')
+        saveBlob(
+          new Blob([await lib.toString(url, { ...options, type: 'svg' })], {
+            type: 'image/svg+xml',
+          }),
+          'teacher-wall-qr.svg',
+        )
+      else {
+        const src = await lib.toDataURL(url, { ...options, width: 2048 }),
+          raw = atob(src.split(',')[1]),
+          bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0))
+        saveBlob(
+          new Blob([bytes], { type: 'image/png' }),
+          'teacher-wall-qr-2048.png',
+        )
+      }
+      notify('QR code downloaded as ' + kind.toUpperCase() + '.')
+    } catch {
+      setError('The QR code could not be created. Please retry.')
+    }
+  }
   async function revoke() {
     setBusy(true)
     setError('')
@@ -1316,6 +1392,55 @@ function Access({
       notify('Teacher sessions revoked. Teachers must unlock the wall again.')
     } catch (err) {
       setError(emptyMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function addMember() {
+    setBusy(true)
+    setMemberError('')
+    try {
+      await api('/api/admin/members/add', { email: newEmail })
+      notify(newEmail.trim().toLowerCase() + ' can now view the council desk.')
+      setNewEmail('')
+      await loadInfo()
+    } catch (err) {
+      setMemberError(emptyMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function removeMember() {
+    setBusy(true)
+    setMemberError('')
+    try {
+      await api('/api/admin/members/remove', { email: removing })
+      notify(removing + ' was removed.')
+      setRemoving('')
+      await loadInfo()
+    } catch (err) {
+      setMemberError(emptyMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function savePassphrase() {
+    setBusy(true)
+    setPassError('')
+    try {
+      if (passConfirm === 'reset') {
+        await api('/api/admin/passphrase/reset', {})
+        notify('Teachers now use the deployment passphrase again.')
+      } else {
+        await api('/api/admin/passphrase', { passphrase: pass })
+        setShown(pass)
+        notify('New passphrase saved. Teachers were signed out.')
+      }
+      setPass('')
+      setPassConfirm('')
+      await loadInfo()
+    } catch (err) {
+      setPassError(emptyMessage(err))
     } finally {
       setBusy(false)
     }
@@ -1353,6 +1478,97 @@ function Access({
             </button>
           </div>
         </div>
+        <div className="adm-actions" aria-label="Download the QR code">
+          <button onClick={() => void downloadQr('svg')}>Download SVG</button>
+          <button onClick={() => void downloadQr('png')}>
+            Download PNG (2048 px)
+          </button>
+        </div>
+        <div className="adm-rule">
+          <h3>Teacher passphrase</h3>
+          {!manager ? (
+            <p>
+              {infoError ||
+                'Access managers create and change the passphrase here.'}
+            </p>
+          ) : (
+            <>
+              <p>
+                {info?.passphrase?.source === 'app'
+                  ? 'Set in this desk by ' +
+                    info.passphrase.updatedBy +
+                    (info.passphrase.updatedAt
+                      ? ', ' + time(info.passphrase.updatedAt)
+                      : '') +
+                    '. It is stored securely and cannot be read back.'
+                  : 'Using the passphrase configured at deployment.'}
+              </p>
+              {shown && (
+                <p className="adm-identity" role="status">
+                  <span>
+                    <small>New passphrase (shown once)</small>
+                    <strong>{shown}</strong>
+                  </span>
+                  <button
+                    onClick={() =>
+                      navigator.clipboard
+                        .writeText(shown)
+                        .then(() => notify('Passphrase copied.'))
+                        .catch(() => {})
+                    }
+                  >
+                    <Icon name="copy" />
+                    Copy
+                  </button>
+                </p>
+              )}
+              <label>
+                New passphrase
+                <input
+                  value={pass}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(e) => {
+                    setPass(e.target.value)
+                    setPassError('')
+                  }}
+                />
+              </label>
+              <div className="adm-actions">
+                <button
+                  onClick={() => {
+                    setPass(generatePassphrase())
+                    setPassError('')
+                  }}
+                >
+                  Generate
+                </button>
+                <button
+                  className="adm-danger"
+                  disabled={busy || pass.length < 8}
+                  onClick={() => {
+                    setPassError('')
+                    setPassConfirm('set')
+                  }}
+                >
+                  Save passphrase
+                </button>
+                {info?.passphrase?.source === 'app' && (
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      setPassError('')
+                      setPassConfirm('reset')
+                    }}
+                  >
+                    Use deployment passphrase
+                  </button>
+                )}
+              </div>
+              <StateError message={passConfirm ? '' : passError} />
+            </>
+          )}
+        </div>
         <div className="adm-rule">
           <h3>Teacher sessions</h3>
           <p>
@@ -1361,6 +1577,7 @@ function Access({
           </p>
           <button
             className="adm-danger"
+            disabled={readOnly}
             onClick={() => {
               setError('')
               setConfirm(true)
@@ -1369,37 +1586,118 @@ function Access({
             Revoke teacher sessions
           </button>
         </div>
-        <details>
-          <summary>Rotate the passphrase</summary>
-          <p>
-            Set a new TEACHER_PASSPHRASE secret on the production Pages project
-            and deploy the updated binding. Revoke teacher sessions, then share
-            the new passphrase privately with staff.
-          </p>
-        </details>
         <StateError message={confirm ? '' : error} />
       </section>
       <section className="adm-panel">
         <h2>Council administrators</h2>
-        <p>Named Google accounts manage the wall through Cloudflare Access.</p>
+        <p>
+          Named Google accounts reach the council desk through Cloudflare
+          Access. Council members you add can monitor the desk and view the
+          wall, but cannot change anything.
+        </p>
         <div className="adm-identity">
           <span className="adm-avatar">
             <Icon name="access" />
           </span>
           <div>
-            <small>Signed in as</small>
+            <small>
+              Signed in as{' '}
+              {info
+                ? { manager: 'access manager', admin: 'administrator', viewer: 'read-only member' }[
+                    info.role
+                  ]
+                : ''}
+            </small>
             <strong>{data.identity}</strong>
           </div>
         </div>
-        <details>
-          <summary>Manage Google identities</summary>
-          <p>
-            Add or remove the exact Google email in the Access application’s
-            allow policy and the server administrator allowlist. Deploy the
-            updated allowlist. For a departing administrator, revoke their
-            Cloudflare Access sessions.
+        <p>
+          <a href="/admin/wall">View the wall</a> as a council member.
+        </p>
+        {readOnly && (
+          <p role="status">
+            You have read-only access. You can browse everything, but changes
+            are turned off.
           </p>
-        </details>
+        )}
+        {manager && (
+          <>
+            <div className="adm-rule">
+              <h3>Add a council member</h3>
+              {!info?.sync && !data.demo && (
+                <p role="alert" className="adm-error">
+                  Cloudflare Access sync is not configured on this deployment,
+                  so members cannot be added or removed yet.
+                </p>
+              )}
+              <label>
+                Google email
+                <input
+                  type="email"
+                  value={newEmail}
+                  autoComplete="off"
+                  placeholder="name@stjbs.sch.id"
+                  onChange={(e) => {
+                    setNewEmail(e.target.value)
+                    setMemberError('')
+                  }}
+                />
+              </label>
+              <div className="adm-actions">
+                <button
+                  disabled={busy || !newEmail.trim() || (!info?.sync && !data.demo)}
+                  onClick={() => void addMember()}
+                >
+                  {busy && !removing ? 'Adding…' : 'Add member'}
+                </button>
+              </div>
+              <StateError message={removing ? '' : memberError} />
+            </div>
+            <div className="adm-rule">
+              <h3>Council members ({info?.members?.length ?? 0})</h3>
+              {info?.members?.length ? (
+                <ul>
+                  {info.members.map((m) => (
+                    <li key={m.email}>
+                      {m.email}{' '}
+                      <small>
+                        added by {m.addedBy}, {time(m.addedAt)}
+                      </small>{' '}
+                      <button
+                        className="adm-danger"
+                        disabled={busy || (!info.sync && !data.demo)}
+                        onClick={() => {
+                          setMemberError('')
+                          setRemoving(m.email)
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No read-only members yet.</p>
+              )}
+            </div>
+            <details>
+              <summary>Full administrators ({info?.admins?.length ?? 0})</summary>
+              <ul>
+                {(info?.admins || []).map((e) => (
+                  <li key={e}>
+                    {e}
+                    {info?.managers?.includes(e) ? ' (access manager)' : ''}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                Full administrators and access managers are set by the
+                deployment’s ADMIN_EMAILS and ACCESS_MANAGERS settings.
+              </p>
+            </details>
+          </>
+        )}
+        <StateError message={manager ? '' : infoError} />
       </section>
       {confirm && (
         <Dialog
@@ -1421,6 +1719,63 @@ function Access({
               {busy ? 'Revoking…' : 'Revoke sessions'}
             </button>
             <button disabled={busy} onClick={() => setConfirm(false)}>
+              Cancel
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {passConfirm && (
+        <Dialog
+          title={
+            passConfirm === 'reset'
+              ? 'Use the deployment passphrase?'
+              : 'Change the teacher passphrase?'
+          }
+          onClose={() => {
+            if (!busy) setPassConfirm('')
+          }}
+        >
+          <p>
+            Every teacher will be signed out and must enter the{' '}
+            {passConfirm === 'reset' ? 'deployment' : 'new'} passphrase to open
+            the wall again. Share it with staff privately.
+          </p>
+          <StateError message={passError} />
+          <div className="adm-actions">
+            <button
+              className="adm-danger"
+              disabled={busy}
+              onClick={() => void savePassphrase()}
+            >
+              {busy ? 'Saving…' : 'Change passphrase'}
+            </button>
+            <button disabled={busy} onClick={() => setPassConfirm('')}>
+              Cancel
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {removing && (
+        <Dialog
+          title="Remove this council member?"
+          onClose={() => {
+            if (!busy) setRemoving('')
+          }}
+        >
+          <p>
+            {removing} will lose access to the council desk and the wall
+            preview.
+          </p>
+          <StateError message={memberError} />
+          <div className="adm-actions">
+            <button
+              className="adm-danger"
+              disabled={busy}
+              onClick={() => void removeMember()}
+            >
+              {busy ? 'Removing…' : 'Remove member'}
+            </button>
+            <button disabled={busy} onClick={() => setRemoving('')}>
               Cancel
             </button>
           </div>
