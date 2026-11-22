@@ -1,0 +1,40 @@
+:root {
+  font-family: 'DM Sans', sans-serif;
+  color: #293c32;
+  background: #f6f3ea;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+input,
+button,
+select,
+textarea {
+  font: inherit;
+}
+button,
+select {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+:focus-visible {
+  outline: 3px solid #097487;
+  outline-offset: 3px;
+}
+::selection {
+  background: #f1d39d;
+  color: #24392f;
+}
+.loading-wall {
+  padding: 12vh 8vw;
+  font:
+    3rem 'Instrument Serif',
+    Georgia,
+    serif;
+}

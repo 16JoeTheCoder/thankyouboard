@@ -4,6 +4,22 @@ This runbook is for the owner’s Claude Code terminal agent to execute later, o
 
 Deploy the approved Teacher Appreciation Wall from start to finish using the attached Cloudflare credential, Wrangler and the Cloudflare API. The owner should only need to complete a Google OAuth Console step if the correct OAuth client is missing or its redirect settings need updating. This repository is public. Keep live notes, credentials, administrator emails and account-specific values out of Git and public preview output.
 
+## Application settings
+
+The production Pages configuration is `wrangler.toml`. It declares the `DB` D1 binding and `dist/` output. Its database ID is a placeholder. After provisioning D1, create a private release checkout of the approved commit and put the real database ID in its root `wrangler.toml`. Run migrations, the private seed command, the build, and Pages deployment from that checkout. Wrangler Pages discovers its configuration at the project root. Keep the edited configuration out of Git. The local demo has its own database and loopback-only identity flow.
+
+| Binding | Production value |
+| --- | --- |
+| `TEACHER_PASSPHRASE` | The privately chosen shared passphrase |
+| `SESSION_SECRET` | An independent, randomly generated secret |
+| `ADMIN_HOST` | Exact canonical school hostname, without scheme or path, used for both teacher and council requests |
+| `ACCESS_ISSUER` | Exact HTTPS Zero Trust team origin, without a trailing slash |
+| `ACCESS_AUD` | Audience tag for this Access application |
+| `ADMIN_EMAILS` | Comma-separated named Google identities approved by the owner |
+| `DEDICATION` | Optional Student Council dedication text |
+
+Leave `LOCAL_DEMO` unset on Cloudflare. Apply Access to `/admin`, `/admin/*`, `/api/admin` and `/api/admin/*`. Teacher APIs under `/api/` perform their own session checks. Rotating either teacher secret invalidates existing teacher session tokens.
+
 ## 1. Resolve the account and release inputs
 
 - Start at the approved commit. Read [the build prompt](docs/BUILD_PROMPT.md), the lockfile, package scripts, and actual Wrangler config. Record the Pages project name, output directory, D1 binding name, admin routes and entry commands. Verify the app implementation, production build, migrations and private seed command exist before creating live resources. Use the real app's declared names if they differ from examples here.
@@ -34,6 +50,14 @@ Teacher access uses the 30-day shared-passphrase flow. Google sign-in through Cl
 - Apply migrations in order on the explicit target. The typical Wrangler command is `npx wrangler d1 migrations apply <production-db-name> --remote` using the repo's production config. Confirm the pending migration list after applying. Check that new schema stays compatible with the rollback deployment or record database recovery separately. [Cloudflare D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/)
 - Set production secrets using Pages secret bindings via Wrangler or the API. Supply the agreed teacher passphrase, app session signing secret and any other app-required values. Supply the Access issuer and audience as server-only configuration. Use secure stdin or the platform's secret channels. Do not commit dotenv files, Google credential exports or release datasets. [Wrangler Pages commands](https://developers.cloudflare.com/workers/wrangler/commands/pages/)
 - Execute the repo's private seed command against the explicit production D1 target. Validate 500 distinct approved notes, 41 teachers and a minimum of three per teacher at first seed. Record counts only. Preserve staff changes on redeploy and use the idempotent command for safe retries. Confirm no production data appears in previews, browser bundles or logs.
+
+For the initial private import, use the approved JSON outside the checkout, and pass the private configuration and production database explicitly.
+
+```sh
+npm run seed:private -- --file /private/approved-notes.json --database <production-db-name> --config ./wrangler.toml --remote
+```
+
+Resolve `pages_build_output_dir` and `migrations_dir` relative to the private configuration file, or use absolute paths there. An identical import preserves subsequent moderation. Use authenticated backup recovery for later content changes.
 
 ## 4. Deploy and attach the domain
 

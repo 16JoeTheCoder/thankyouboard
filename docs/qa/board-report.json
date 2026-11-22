@@ -1,0 +1,222 @@
+{
+  "steps": [
+    "Invalid passphrase rejected, valid passphrase unlocks, dedication appears once and can be replayed",
+    "Original, After Hours, Blue Hour and Garden show distinct colors and the selected theme survives reload",
+    "Teacher spotlight reaches the 55-note reader with 4 travelling cards",
+    "Board keyboard entry, arrow navigation and a focus-preserving preview reach an individual note",
+    "Browse all notes works by keyboard, keeps focus in the modal and restores focus on Escape",
+    "Surprise me opens a reader and Escape returns to the board",
+    "Desktop hover reveals a readable preview while preserving focus and adjacent pointer targets",
+    "Eight physical mouse clicks open the exact expected synthetic notes from all eight letters",
+    "At a 390px touch viewport teacher search is visible, the page fits, and one real tile tap opens the reader",
+    "Reduced motion preserves the teacher reader without animated spotlight travel",
+    "4× CPU sweep traces all 500 notes and rapid teacher changes with no >50 ms hover tasks or idle animation"
+  ],
+  "errors": [],
+  "browser": "Chrome/156.0.8078.79",
+  "desktop": {
+    "width": 1440,
+    "height": 1000,
+    "deviceScaleFactor": 1
+  },
+  "phone": {
+    "width": 390,
+    "height": 844,
+    "deviceScaleFactor": 1,
+    "isMobile": true,
+    "hasTouch": true
+  },
+  "performance": {
+    "tracePath": "/tmp/stjbs-review-trace/board-4x.trace.json",
+    "points": 500,
+    "hitSlots": 500,
+    "idleAnimations": 0,
+    "dwellResults": [
+      {
+        "slot": "196",
+        "correct": true
+      },
+      {
+        "slot": "28",
+        "correct": true
+      },
+      {
+        "slot": "229",
+        "correct": true
+      },
+      {
+        "slot": "175",
+        "correct": true
+      },
+      {
+        "slot": "445",
+        "correct": true
+      },
+      {
+        "slot": "467",
+        "correct": true
+      }
+    ],
+    "rapidSelections": [
+      {
+        "selections": 3,
+        "intervalsMs": [
+          60.77821299999778,
+          49.23956800000087
+        ],
+        "finalTitle": "Amal Patel"
+      },
+      {
+        "selections": 3,
+        "intervalsMs": [
+          38.035650000001624,
+          59.616086999998515
+        ],
+        "finalTitle": "Ada Chen"
+      }
+    ],
+    "segments": {
+      "idle": {
+        "durationMs": 1104.972,
+        "frames": {
+          "BeginFrame": 1
+        },
+        "drawnFramesPerSecond": 0,
+        "p95DrawIntervalMs": null,
+        "maxDrawIntervalMs": null,
+        "animationCallbacks": 0,
+        "longTasks": []
+      },
+      "hover": {
+        "durationMs": 9153.16,
+        "frames": {
+          "BeginFrame": 545
+        },
+        "drawnFramesPerSecond": 0,
+        "p95DrawIntervalMs": null,
+        "maxDrawIntervalMs": null,
+        "animationCallbacks": 0,
+        "longTasks": []
+      },
+      "dwell": {
+        "durationMs": 1898.982,
+        "frames": {
+          "BeginFrame": 99,
+          "DroppedFrame": 34,
+          "DrawFrame": 77
+        },
+        "drawnFramesPerSecond": 40.548041003021616,
+        "p95DrawIntervalMs": 101.467,
+        "maxDrawIntervalMs": 106.116,
+        "animationCallbacks": 0,
+        "longTasks": []
+      },
+      "teachers": {
+        "durationMs": 1326.392,
+        "frames": {
+          "BeginFrame": 80,
+          "DrawFrame": 16,
+          "DroppedFrame": 18
+        },
+        "drawnFramesPerSecond": 12.062798931236015,
+        "p95DrawIntervalMs": 237.273,
+        "maxDrawIntervalMs": 237.273,
+        "animationCallbacks": 24,
+        "longTasks": [
+          {
+            "elapsedMs": 57.992,
+            "durationMs": 108.934,
+            "threadMs": 103.114,
+            "activity": [
+              {
+                "name": "UpdateLayoutTree",
+                "ms": 57.149
+              },
+              {
+                "name": "EventDispatch",
+                "ms": 19.349
+              },
+              {
+                "name": "FunctionCall",
+                "ms": 17.242
+              },
+              {
+                "name": "Layout",
+                "ms": 10.196
+              }
+            ]
+          },
+          {
+            "elapsedMs": 530.219,
+            "durationMs": 98.605,
+            "threadMs": 96.926,
+            "activity": [
+              {
+                "name": "FunctionCall",
+                "ms": 98.493
+              },
+              {
+                "name": "UpdateLayoutTree",
+                "ms": 84.88
+              },
+              {
+                "name": "Layout",
+                "ms": 8.859
+              },
+              {
+                "name": "EventDispatch",
+                "ms": 1.337
+              }
+            ]
+          },
+          {
+            "elapsedMs": 757.352,
+            "durationMs": 66.857,
+            "threadMs": 66.622,
+            "activity": [
+              {
+                "name": "UpdateLayoutTree",
+                "ms": 24.207
+              },
+              {
+                "name": "Paint",
+                "ms": 12.374
+              },
+              {
+                "name": "Paint",
+                "ms": 12.331
+              },
+              {
+                "name": "Paint",
+                "ms": 11.558
+              }
+            ]
+          },
+          {
+            "elapsedMs": 1163.955,
+            "durationMs": 57.067,
+            "threadMs": 56.262,
+            "activity": [
+              {
+                "name": "FunctionCall",
+                "ms": 56.272
+              },
+              {
+                "name": "UpdateLayoutTree",
+                "ms": 28.283
+              },
+              {
+                "name": "Layout",
+                "ms": 25.021
+              },
+              {
+                "name": "UpdateLayoutTree",
+                "ms": 1.069
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
