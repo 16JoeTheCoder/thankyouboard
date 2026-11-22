@@ -6,7 +6,7 @@ Deploy the approved Teacher Appreciation Wall from start to finish using the att
 
 ## Application settings
 
-The production Pages configuration is `wrangler.toml`. It declares the `DB` D1 binding and `dist/` output. Its database ID is a placeholder. Provision the real database first and supply its ID in a private release configuration. The local demo has its own database and loopback-only identity flow.
+The production Pages configuration is `wrangler.toml`. It declares the `DB` D1 binding and `dist/` output. Its database ID is a placeholder. After provisioning D1, create a private release checkout of the approved commit and put the real database ID in its root `wrangler.toml`. Run migrations, the private seed command, the build, and Pages deployment from that checkout. Wrangler Pages discovers its configuration at the project root. Keep the edited configuration out of Git. The local demo has its own database and loopback-only identity flow.
 
 | Binding | Production value |
 | --- | --- |
@@ -54,7 +54,7 @@ Teacher access uses the 30-day shared-passphrase flow. Google sign-in through Cl
 For the initial private import, use the approved JSON outside the checkout, and pass the private configuration and production database explicitly.
 
 ```sh
-npm run seed:private -- --file /private/approved-notes.json --database <production-db-name> --config /private/wrangler.toml --remote
+npm run seed:private -- --file /private/approved-notes.json --database <production-db-name> --config ./wrangler.toml --remote
 ```
 
 Resolve `pages_build_output_dir` and `migrations_dir` relative to the private configuration file, or use absolute paths there. An identical import preserves subsequent moderation. Use authenticated backup recovery for later content changes.
