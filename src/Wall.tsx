@@ -28,6 +28,8 @@ import {
   LockKeyhole,
   LogOut,
   Mail,
+  Maximize2,
+  Minimize2,
   Palette,
   RotateCcw,
   Search,
@@ -396,7 +398,11 @@ const PrintedWall = memo(function PrintedWall({
           brush.fill()
         }
         if (slot.excerpt) {
-          const fontSize = Math.min(8, Math.max(3, width * 0.006))
+          // Small notes get proportionally smaller type so every note carries text.
+          const fontSize = Math.max(
+            2.4,
+            Math.min(8, Math.max(3, width * 0.006), w * 0.2),
+          )
           brush.beginPath()
           brush.rect(w * 0.12, h * 0.1, w * 0.77, h * 0.72)
           brush.clip()
@@ -451,6 +457,7 @@ const Cards = memo(function Cards({
           width: s.width + '%',
           height: s.height + '%',
           '--tilt': s.tilt + 'deg',
+          '--sw': s.width,
         } as CSSProperties
         return (
           <button
@@ -592,6 +599,7 @@ function BoardArt({
           card.style.top = y + 'px'
           card.style.width = w + 'px'
           card.style.height = h + 'px'
+          card.style.setProperty('--sw', String(slot.width))
           card.firstElementChild!.firstElementChild!.textContent = slot.excerpt
             ? note.text.slice(0, 56)
             : ''
@@ -1041,7 +1049,10 @@ export default function Wall() {
     flight = useRef<Promise<WallNote[]> | null>(null),
     epoch = useRef(0),
     timer = useRef<ReturnType<typeof setTimeout> | null>(null),
-    searchBox = useRef<HTMLDivElement>(null)
+    searchBox = useRef<HTMLDivElement>(null),
+    collection = useRef<HTMLElement>(null),
+    viewButton = useRef<HTMLButtonElement>(null)
+  const [full, setFull] = useState(false)
   const cancel = useCallback(() => {
     if (timer.current !== null) {
       clearTimeout(timer.current)
@@ -1176,21 +1187,27 @@ export default function Wall() {
       (a, b) => a.name.localeCompare(b.name),
     )
   }, [notes])
+  // Choosing a teacher dims the wall and lights her notes; she opens them when ready.
   function pick(t: string) {
     cancel()
     setPanel(null)
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setPanel({ type: 'teacher', teacher: t })
-      return
-    }
     setSpot(t)
-    timer.current = setTimeout(() => {
-      timer.current = null
-      setSpot(null)
-      if (cache.current.notes.some((n) => n.teacher === t))
-        setPanel({ type: 'teacher', teacher: t })
-    }, 220)
   }
+  const spotCount = spot ? notes.filter((n) => n.teacher === spot).length : 0
+  const lit = spotCount > 0 ? spot : null
+  useEffect(() => {
+    if (lit) viewButton.current?.focus({ preventScroll: true })
+  }, [lit])
+  useEffect(() => {
+    const sync = () => setFull(document.fullscreenElement === collection.current)
+    document.addEventListener('fullscreenchange', sync)
+    return () => document.removeEventListener('fullscreenchange', sync)
+  }, [])
+  function toggleFull() {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+    else void collection.current?.requestFullscreen().catch(() => {})
+  }
+  const canFull = typeof document !== 'undefined' && !!document.fullscreenEnabled
   function openPanel(p: Panel) {
     cancel()
     setPanel(p)
@@ -1289,29 +1306,65 @@ export default function Wall() {
           <section
             className="wall-collection"
             aria-label="Student appreciation collection"
+            ref={collection}
           >
             <div className="board-bar">
-              <div>
-                <span className="board-tab">
-                  <Grid2X2 size={15} />
-                  The wall
+              {lit ? (
+                <div className="spot-bar">
+                  <span className="spot-who" role="status">
+                    <strong>{lit}</strong>
+                    <small>{noteCount(spotCount)} lit up on the wall</small>
+                  </span>
+                  <button
+                    ref={viewButton}
+                    className="wall-primary"
+                    onClick={() => openPanel({ type: 'teacher', teacher: lit })}
+                  >
+                    View my notes
+                    <ArrowRight size={16} />
+                  </button>
+                  <button className="wall-ghost" onClick={cancel}>
+                    All notes
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <span className="board-tab">
+                    <Grid2X2 size={15} />
+                    The wall
+                  </span>
+                  <button
+                    className="wall-ghost"
+                    onClick={() => openPanel({ type: 'all' })}
+                  >
+                    <List size={16} />
+                    Browse all notes
+                  </button>
+                </div>
+              )}
+              <div className="board-tools">
+                {canFull && (
+                  <button
+                    className="wall-ghost"
+                    onClick={toggleFull}
+                    aria-pressed={full}
+                    aria-label={full ? 'Exit full screen' : 'Full screen'}
+                  >
+                    {full ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                    <span className="tool-label">
+                      {full ? 'Exit full screen' : 'Full screen'}
+                    </span>
+                  </button>
+                )}
+                <span className="wall-count">
+                  {loaded
+                    ? noteCount(notes.length) +
+                      ' · ' +
+                      teachers.length +
+                      ' teachers'
+                    : 'Loading notes…'}
                 </span>
-                <button
-                  className="wall-ghost"
-                  onClick={() => openPanel({ type: 'all' })}
-                >
-                  <List size={16} />
-                  Browse all notes
-                </button>
               </div>
-              <span className="wall-count">
-                {loaded
-                  ? noteCount(notes.length) +
-                    ' · ' +
-                    teachers.length +
-                    ' teachers'
-                  : 'Loading notes…'}
-              </span>
             </div>
             {error && (
               <div className="wall-error" role="alert">
@@ -1330,7 +1383,7 @@ export default function Wall() {
               <BoardArt
                 theme={theme}
                 notes={notes}
-                spot={spot}
+                spot={lit}
                 onNote={(id) => openPanel({ type: 'note', id })}
               />
             )}

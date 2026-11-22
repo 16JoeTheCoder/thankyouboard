@@ -123,6 +123,17 @@ async function searchForTeacher(page, teacher) {
   return control(page, buttonName, '.teacher-search [role="option"]');
 }
 
+// Choosing a teacher dims the wall and lights her notes; the reader opens only from this button.
+async function viewMyNotes(page, name) {
+  await page.waitForFunction(() => document.querySelector('.paper-board.spotlight') && document.querySelector('.spot-bar'));
+  assert.equal(await visibleDialogs(page), 0, 'Choosing a teacher must not open the reader by itself');
+  assert((await page.$eval('.spot-bar', (bar) => bar.textContent)).includes(name), 'The spotlight bar should name the selected teacher');
+  const button = await control(page, /^View my notes$/i, '.spot-bar button');
+  await button.click();
+  await button.dispose();
+  await waitForDialog(page, name);
+}
+
 async function tracePerformance(page, points, rapidTeacherSelections) {
   const session = await page.createCDPSession();
   await session.send('Emulation.setCPUThrottlingRate', { rate: 4 });
@@ -301,7 +312,7 @@ async function checkDesktop(page, teachers) {
   const spotlightState = await page.evaluate(() => ({ matched: document.querySelectorAll('.paper-board .matched').length, travelling: document.querySelectorAll('.paper-board .spot-lift').length }));
   assert.equal(spotlightState.matched, teachers[0].count, 'Spotlight should highlight every visible note for the selected teacher');
   assert(spotlightState.travelling <= 4, 'Only a capped subset of matching note cards can travel');
-  await waitForDialog(page, teachers[0].name);
+  await viewMyNotes(page, teachers[0].name);
   await screenshot(page, 'desktop-teacher-spotlight');
   await closeDialog(page);
   pass(`Teacher spotlight reaches the ${teachers[0].count}-note reader with ${spotlightState.travelling} travelling cards`);
@@ -405,7 +416,7 @@ async function checkPhone(page, teacher) {
   const match = await searchForTeacher(page, teacher.name);
   await match.click();
   await match.dispose();
-  await waitForDialog(page, teacher.name);
+  await viewMyNotes(page, teacher.name);
   const motion = await page.evaluate(() => ({ pref: matchMedia('(prefers-reduced-motion: reduce)').matches, travelling: [...document.querySelectorAll('.paper-board .spot-lift')].filter((element) => element.getAnimations().some((animation) => animation.playState === 'running')).length }));
   assert(motion.pref && motion.travelling === 0, 'Reduced motion must preserve content without animated travelling cards');
   await screenshot(page, 'phone-teacher-reduced-motion');
@@ -442,7 +453,7 @@ async function rapidSelections(page, teachers) {
     previous = current;
   }
   const finalTitle = teachers.at(-1).name;
-  await waitForDialog(page, finalTitle);
+  await viewMyNotes(page, finalTitle);
   const { titles, spotlights } = await page.evaluate(() => {
     window.qaReaders.disconnect();
     return { titles: window.qaReaderTitles, spotlights: window.qaSpotlights };

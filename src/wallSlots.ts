@@ -60,5 +60,5 @@ export const wallSlots = rects
     variant: Math.floor(random() * 4),
     tilt: (random() - 0.5) * 8,
     large: r.w * r.h > 0.57,
-    excerpt: r.w > 0.57 && r.h > 0.48,
+    excerpt: true, // every note carries its printed opening line
   }))
