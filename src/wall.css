@@ -630,7 +630,8 @@
 }
 .paper-face > span {
   font:
-    italic clamp(2.4px, min(0.6cqw, calc(var(--sw, 4) * 0.2cqw)), 8px) / 1 'Instrument Serif',
+    italic clamp(2.4px, min(0.6cqw, calc(var(--sw, 4) * 0.2cqw)), 8px) / 1
+      'Instrument Serif',
     Georgia,
     serif;
   text-align: left;
@@ -1179,9 +1180,13 @@
   inset: 0;
   z-index: 4;
 }
-.paper-hit-plane[data-slot] { cursor: pointer; }
+.paper-hit-plane[data-slot] {
+  cursor: pointer;
+}
 @media (pointer: coarse) {
-  .paper-hit-plane { display: none; }
+  .paper-hit-plane {
+    display: none;
+  }
 }
 
 /* Spotlight prompt in the board bar */
@@ -1381,5 +1386,100 @@
   }
   .board-zoom output {
     min-width: 40px;
+  }
+}
+
+.entry-back {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  color: var(--soft);
+  font-size: 0.8rem;
+  text-decoration: none;
+  margin-bottom: 20px;
+}
+.entry-back:hover {
+  text-decoration: underline;
+}
+.role-links {
+  display: grid;
+  gap: 10px;
+  max-width: 370px;
+}
+.role-links a {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.role-links a:hover,
+.role-links a:focus-visible {
+  border-color: var(--berry);
+}
+.role-links a > svg:first-child {
+  color: var(--berry);
+}
+.role-links a > svg:last-child {
+  width: 17px;
+  margin-left: auto;
+}
+.role-links strong,
+.role-links small {
+  display: block;
+}
+.role-links strong {
+  font-size: 1rem;
+}
+.role-links small {
+  font-size: 0.8rem;
+  color: var(--soft);
+  margin-top: 2px;
+}
+.wall-gate .student-letter h1 {
+  font-size: clamp(3.3rem, 6vw, 5.8rem);
+  line-height: 0.92;
+}
+.student-letter select,
+.student-letter textarea {
+  width: 100%;
+  padding: 12px;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  font: inherit;
+}
+.student-letter select {
+  margin-bottom: 16px;
+}
+.student-letter textarea {
+  resize: vertical;
+  line-height: 1.5;
+  min-height: 100px;
+}
+.student-count {
+  text-align: right;
+  color: var(--soft);
+  font-size: 0.72rem;
+  margin: 4px 0 12px;
+}
+.student-letter [role='status'] p {
+  line-height: 1.6;
+  max-width: 40ch;
+}
+@media (max-width: 680px) {
+  .entry-student .gate-photo {
+    display: none;
+  }
+  .wall-gate .student-letter h1 {
+    max-width: 100%;
+  }
+  .role-links {
+    max-width: none;
   }
 }

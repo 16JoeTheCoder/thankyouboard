@@ -221,40 +221,40 @@ await check('restoring the seeded revision reclaims its original slot when avail
   assertAccepted(await writeNote(noteById(await adminState(), hidden.id), { visible: false }), 'free the slot again')
 })
 
-let raceWinner
-await check('concurrent allocation fills the unique last available slot and retry is idempotent', async () => {
+const additions = []
+await check('concurrent allocation uses separate slots and grows past 500', async () => {
   const secondAdmin = new Client()
   assertAccepted(await secondAdmin.request('/api/demo/admin', { method: 'POST' }), 'independent admin client')
   const bodies = [0, 1].map(index => ({
     requestId: requestId(),
-    id: `qa-last-${requestId()}`,
+    id: `qa-add-${requestId()}`,
     expectedRevision: 0,
     teacher: originalTeacher,
-    text: `Synthetic QA last-slot candidate ${index + 1}.`,
+    text: `Synthetic QA growth candidate ${index + 1}.`,
     visible: true,
   }))
-  const responses = await Promise.all([
-    changed('/api/admin/notes', bodies[0]),
-    secondAdmin.request('/api/admin/notes', { method: 'POST', body: bodies[1] }),
-  ])
-  assert.equal(responses.filter(isAccepted).length, 1, `Only one write should claim the final slot: ${responses.map(result => result.status).join(', ')}`)
-  const winner = responses.findIndex(isAccepted)
-  assertRejected(responses[1 - winner], 'second concurrent allocation')
-  const filled = await board()
-  assert.equal(filled.data.notes.length, 500)
-  assert.equal(new Set(filled.data.notes.map(note => note.slot)).size, 500)
-  assert.equal(noteById(filled.data, bodies[winner].id).slot, slots.get(coverageNote.id))
-  assert.ok(!filled.data.notes.some(note => note.id === bodies[1 - winner].id))
-  for (const note of filled.data.notes.filter(note => note.id !== bodies[winner].id)) {
-    assert.equal(note.slot, slots.get(note.id), note.id)
+  const submit = (client, body) => client.request('/api/admin/notes', { method: 'POST', body })
+  const clients = [admin, secondAdmin]
+  const responses = await Promise.all(bodies.map((body, index) => submit(clients[index], body)))
+  assert.ok(responses.some(isAccepted), 'At least one competing write makes progress')
+  for (const [index, response] of responses.entries()) {
+    if (!isAccepted(response)) {
+      assert.equal(response.status, 409, 'Concurrent allocation may request an optimistic retry')
+      assertAccepted(await submit(clients[index], bodies[index]), 'retry after unrelated note revision')
+    }
   }
+  const filled = (await board()).data
+  assert.equal(filled.notes.length, 501)
+  assert.equal(new Set(filled.notes.map(note => note.slot)).size, 501)
+  additions.push(...bodies.map(body => noteById(filled, body.id)))
+  assert.ok(additions.some(note => note.slot >= 500), 'At least one new note occupies an expansion slot')
+  for (const note of filled.notes.filter(note => slots.has(note.id))) assert.equal(note.slot, slots.get(note.id), note.id)
   const beforeRetry = await adminState()
-  assertAccepted(await changed('/api/admin/notes', bodies[winner]), 'same request ID retry')
+  assertAccepted(await submit(admin, bodies[0]), 'same request ID retry')
   const afterRetry = await adminState()
   assert.equal(afterRetry.revision, beforeRetry.revision)
   assert.equal(afterRetry.history.length, beforeRetry.history.length)
   assert.equal(afterRetry.notes.length, beforeRetry.notes.length)
-  raceWinner = noteById(afterRetry, bodies[winner].id)
 })
 
 await check('concurrent edits detect a stale revision and safely retry against the new revision', async () => {
@@ -272,28 +272,24 @@ await check('concurrent edits detect a stale revision and safely retry against t
   assert.equal(noteById(await adminState(), thirdNote.id).text, current.text)
 })
 
-await check('revision restoration preserves history and refuses to overwrite a full board', async () => {
+await check('revision restoration preserves notes and slots on the expanded board', async () => {
   const current = await adminState()
   const hidden = noteById(current, coverageNote.id)
-  const history = current.history.find(record => record.noteId === coverageNote.id || record.note_id === coverageNote.id)
-  assert.ok(history, 'Find the hide in change history')
-  assert.ok(history.before?.visible && !history.after?.visible, 'Hide records both visibility states')
-  const full = await changed('/api/admin/revision', {
-    requestId: requestId(), id: hidden.id, expectedRevision: hidden.revision, historyId: visibleRevision, side: 'before',
-  })
-  assertRejected(full, 'restore at full capacity')
-  assert.equal((await adminState()).revision, current.revision)
-  assert.equal(noteById(await board().then(result => result.data), raceWinner.id).slot, slots.get(coverageNote.id))
-
-  assertAccepted(await writeNote(noteById(current, secondNote.id), { visible: false }), 'free a different slot')
+  const history = current.history.find(record => record.noteId === coverageNote.id)
+  assert.ok(history?.before?.visible && !history.after?.visible, 'Hide records both visibility states')
+  const expanded = (await board()).data
   assertAccepted(await changed('/api/admin/revision', {
     requestId: requestId(), id: hidden.id, expectedRevision: hidden.revision, historyId: visibleRevision, side: 'before',
-  }), 'restore into available alternate slot')
-  const alternative = (await board()).data
-  assert.equal(noteById(alternative, hidden.id).slot, slots.get(secondNote.id))
-  assert.equal(noteById(alternative, raceWinner.id).slot, slots.get(coverageNote.id))
-  assert.equal(alternative.notes.length, 500)
-  assert.equal(new Set(alternative.notes.map(note => note.slot)).size, 500)
+  }), 'restore onto a board already past 500 notes')
+  const restored = (await board()).data
+  const occupied = new Set(expanded.notes.map(note => note.slot))
+  const restoreSlot = noteById(restored, hidden.id).slot
+  assert.ok(!occupied.has(restoreSlot), 'Restoration uses an unoccupied slot')
+  if (!occupied.has(slots.get(hidden.id))) assert.equal(restoreSlot, slots.get(hidden.id))
+  assert.equal(restored.notes.length, 502)
+  assert.equal(new Set(restored.notes.map(note => note.slot)).size, 502)
+  for (const note of expanded.notes) assert.equal(noteById(restored, note.id).slot, note.slot, note.id)
+  assertAccepted(await writeNote(noteById(await adminState(), secondNote.id), { visible: false }), 'hide a note for backup confirmation tests')
 })
 
 await check('backup dry-run requires explicit republish confirmation and restores exact visible data', async () => {
@@ -305,7 +301,7 @@ await check('backup dry-run requires explicit republish confirmation and restore
   const preview = await changed('/api/admin/restore/preview', backupBody, { status: 200 })
   assert.equal((await adminState()).revision, baseline.revision)
   assert.deepEqual(preview.data.republished, [secondNote.id])
-  assert.ok(preview.data.removed.includes(raceWinner.id))
+  for (const addition of additions) assert.ok(preview.data.removed.includes(addition.id))
   const restoreBody = { ...backupBody, expectedRevision: baseline.revision, requestId: requestId() }
   assertRejected(await changed('/api/admin/restore', { ...restoreBody, expectedRevision: baseline.revision - 1, confirmRepublished: [secondNote.id] }), 'stale recovery preview')
   assertRejected(await changed('/api/admin/restore', { ...restoreBody, requestId: requestId(), confirmRepublished: [] }), 'restore without republish confirmation')
@@ -383,7 +379,7 @@ await check('desktop admin routes and editor survive failed and ambiguous writes
   assert.equal(await page.$eval(notesLink, node => getComputedStyle(node, '::after').content), '"Notes"')
   await page.click('button[aria-label="Expand sidebar"]')
   await page.waitForFunction(() => !document.querySelector('.adm-compact'))
-  for (const route of ['Notes', 'Teachers', 'Change history', 'Backup & restore', 'Access', 'Overview']) {
+  for (const route of ['Notes', 'Review', 'Teachers', 'Change history', 'Backup & restore', 'Access', 'Overview']) {
     await clickText(page, 'nav a, nav button', route)
     await visibleText(page, 'h1', route)
   }
@@ -447,6 +443,19 @@ await check('desktop admin routes and editor survive failed and ambiguous writes
   assertAccepted(await changed('/api/admin/revision', {
     requestId: requestId(), id: coverageNote.id, expectedRevision: hide.after.revision, historyId: hide.id, side: 'before',
   }), 'clean up browser moderation change')
+  await clickText(page, 'button', 'Add note')
+  await page.waitForSelector('dialog[open] input[list="adm-teachers"]')
+  await page.type('dialog[open] input[list="adm-teachers"]', originalTeacher)
+  const expansionText = 'Synthetic QA note added from the expanded council editor.'
+  await page.type('dialog[open] textarea', expansionText)
+  await clickText(page, 'dialog[open] button', 'Save note')
+  await page.waitForFunction(() => !document.querySelector('dialog[open]'))
+  const grown = (await admin.request('/api/admin/board', { status: 200 })).data
+  assert.equal(grown.notes.length, 501)
+  assert.ok(grown.notes.some(note => note.slot >= 500 && note.text === expansionText))
+  assertAccepted(await changed('/api/admin/restore', {
+    backup: originalBackup, expectedRevision: grown.revision, confirmRepublished: [], requestId: requestId(),
+  }), 'clean up browser expansion note')
   await page.close()
 }))
 
@@ -470,7 +479,7 @@ await check('390 px council drawer opens, navigates and closes without horizonta
 await check('browser refresh evicts a hidden open note and removes it from teacher export', () => browserCheck(async browser => {
   const page = await browser.newPage()
   await page.setViewport({ width: 1440, height: 1000 })
-  await page.goto(origin.href, { waitUntil: 'networkidle0' })
+  await page.goto(new URL('/teacher', origin).href, { waitUntil: 'networkidle0' })
   await page.type('input[type="password"]', demoPassphrase)
   await clickText(page, 'button', 'Unlock the wall')
   await clickText(page, 'button', 'Open the wall')
@@ -496,13 +505,11 @@ await check('browser refresh evicts a hidden open note and removes it from teach
     await page.waitForFunction((id, text) => ![...document.querySelectorAll('.paper-board button[data-id]')].some(node => node.dataset.id === id)
       && ![...document.querySelectorAll('dialog[open], [role="dialog"]')].some(dialog => dialog.textContent.includes(text)), {}, current.id, current.text)
     await page.screenshot({ path: resolve(artifacts, 'active-wall-after-hide.png') })
-    const search = await page.waitForFunction(() => [...document.querySelectorAll('input')].find(
-      input => ['aria-label', 'placeholder'].some(attribute => /find my notes|teacher/i.test(input.getAttribute(attribute) || '')),
-    ))
-    await search.asElement().type(current.teacher)
-    await visibleText(page, 'button', current.teacher)
-    const teacherButton = await page.waitForFunction(teacher => [...document.querySelectorAll('button')].find(button => button.textContent.trim().startsWith(teacher)), {}, current.teacher)
-    await teacherButton.asElement().click()
+    await page.type('input[aria-label="Find my notes"]', current.teacher)
+    await visibleText(page, '#wall-profiles [role="option"]', current.teacher)
+    await page.keyboard.press('Enter')
+    await clickText(page, '.spot-bar button', 'View my notes')
+    await visibleText(page, 'dialog[open] h2, [role="dialog"] h2', current.teacher)
     await clickText(page, 'dialog[open] button, [role="dialog"] button', 'Save my notes')
     await page.waitForSelector('.ks-dialog[open] .ks-list input[type="checkbox"]')
     assert.equal(await page.$$eval('.ks-list input[type="checkbox"]', inputs => inputs.length), 2)

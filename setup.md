@@ -29,6 +29,14 @@ The production Pages configuration is `wrangler.toml`. It declares the `DB` D1 b
 
 Leave `LOCAL_DEMO` unset on Cloudflare. Apply Access to `/admin`, `/admin/*`, `/api/admin` and `/api/admin/*`. Teacher APIs under `/api/` perform their own session checks. Rotating either teacher secret invalidates existing teacher session tokens.
 
+## Student submissions and scheduled trash cleanup
+
+On upgrades, record an existing D1 backup or Time Travel recovery point. Apply pending migrations including `0004_student_submissions.sql` to the bound production database before updating Pages. This migration preserves existing notes, slots and moderation history. Skip the initial seed on an established wall.
+
+Deploy the accompanying scheduled Worker from the same private release checkout. Set `maintenance/wrangler.toml`'s `DB` binding to the same production D1 database name and ID as Pages. Run `npx wrangler deploy --config maintenance/wrangler.toml` and confirm the once-per-minute Cron Trigger. This Worker needs only D1 access and a Cron Trigger. It has no public endpoint. The review API excludes expired notes at the 30-day deadline, and the scheduled Worker deletes them on its next invocation even during periods without council traffic.
+
+Keep the entrance, `/student`, `/teacher`, `/api/student/teachers` and `/api/student/submit` reachable on the canonical school hostname. The roster returns teacher names. Only the authenticated council review API can read unpublished submissions or decide whether to publish them. The existing Access policy for `/api/admin/*` covers review. Wall backup downloads contain the published/moderated note collection; production D1 recovery also covers the pending queue.
+
 ## 1. Resolve the account and release inputs
 
 - Start at the approved commit. Read [the build prompt](docs/BUILD_PROMPT.md), the lockfile, package scripts, and actual Wrangler config. Record the Pages project name, output directory, D1 binding name, admin routes and entry commands. Verify the app implementation, production build, migrations and private seed command exist before creating live resources. Use the real app's declared names if they differ from examples here.

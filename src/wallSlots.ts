@@ -62,3 +62,39 @@ export const wallSlots = rects
     large: r.w * r.h > 0.57,
     excerpt: true, // every note carries its printed opening line
   }))
+
+// Each new round visits all eight letters in a permuted order. A note splits
+// an existing piece along its longer edge, without moving neighboring pieces.
+// Store only occupied slots, even when restoring a sparse historical backup.
+export type PaperLayout = Map<number, (typeof wallSlots)[number]>
+export function layoutFor(
+  notes: readonly { slot: number }[],
+  lastSlot: number,
+): PaperLayout {
+  const baseCount = wallSlots.length
+  const layout: PaperLayout = new Map()
+  for (const { slot } of notes) {
+    const extra = slot - baseCount
+    const base = extra < 0 ? slot : ((extra % baseCount) * 137) % baseCount
+    const piece = extra < 0 ? 0 : Math.floor(extra / baseCount) + 1
+    // 73 is the multiplicative inverse of 137 modulo 500.
+    const firstExtra = baseCount + ((base * 73) % baseCount)
+    const count =
+      1 + Math.max(0, Math.floor((lastSlot - firstExtra) / baseCount) + 1)
+    const rect = { ...wallSlots[base] }
+    for (let stride = 1; stride < count; stride *= 2) {
+      const parent = piece % stride
+      if (parent + stride >= count) continue
+      const second = piece % (2 * stride) >= stride
+      if (rect.width * 29 >= rect.height * 15.2) {
+        rect.width /= 2
+        if (second) rect.left += rect.width
+      } else {
+        rect.height /= 2
+        if (second) rect.top += rect.height
+      }
+    }
+    layout.set(slot, rect)
+  }
+  return layout
+}

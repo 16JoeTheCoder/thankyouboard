@@ -1,0 +1,14 @@
+name = "stjbs-submission-cleanup"
+main = "cleanup.ts"
+compatibility_date = "2025-10-01"
+workers_dev = false
+preview_urls = false
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "stjbs-appreciation-wall"
+# Set this in the private release checkout to the same D1 ID as the Pages app.
+database_id = "00000000-0000-0000-0000-000000000000"

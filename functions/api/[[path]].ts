@@ -1,4 +1,11 @@
-import { adminSession, logout, teacher, unlock } from '../../server/auth'
+import { review, reviewQueue, submit } from '../../server/submissions'
+import {
+  adminSession,
+  deployment,
+  logout,
+  teacher,
+  unlock,
+} from '../../server/auth'
 import {
   accessState,
   addMember,
@@ -10,6 +17,7 @@ import {
 } from '../../server/access'
 import { backup, mutate, overview, preview } from '../../server/moderation'
 import {
+  cookie,
   digest,
   Failure,
   isDemo,
@@ -34,7 +42,7 @@ export const onRequest: PagesFunction<Env> = async ({ request, env }) => {
         request.headers.get('sec-fetch-site') === 'cross-site')
     )
       throw new Failure(403, 'Submit from the wall itself.')
-    async function body(): Promise<Record<string, unknown>> {
+    async function body(limit?: number): Promise<Record<string, unknown>> {
       if (
         !request.headers
           .get('content-type')
@@ -43,11 +51,31 @@ export const onRequest: PagesFunction<Env> = async ({ request, env }) => {
       )
         throw new Failure(415, 'Send a JSON request.')
       try {
-        const obj = await request.json()
+        let obj: unknown
+        if (limit && request.body) {
+          const reader = request.body.getReader()
+          const decoder = new TextDecoder()
+          let bytes = 0,
+            raw = ''
+          for (;;) {
+            const chunk = await reader.read()
+            if (chunk.done) break
+            bytes += chunk.value.byteLength
+            if (bytes > limit) {
+              await reader.cancel()
+              throw new Failure(413, 'This note is too large.')
+            }
+            raw += decoder.decode(chunk.value, { stream: true })
+          }
+          obj = JSON.parse(raw + decoder.decode())
+        } else {
+          obj = await request.json()
+        }
         if (!obj || typeof obj !== 'object' || Array.isArray(obj))
           throw new Error()
         return obj as Record<string, unknown>
-      } catch {
+      } catch (err) {
+        if (err instanceof Failure) throw err
         throw new Failure(400, 'The request did not contain a JSON object.')
       }
     }
@@ -66,16 +94,50 @@ export const onRequest: PagesFunction<Env> = async ({ request, env }) => {
           headers: { ...privateHeaders, ETag: '"' + revision + '"' },
         })
       const [current, notes] = await env.DB.batch<Record<string, unknown>>([
-        env.DB.prepare('SELECT revision FROM state WHERE id=1'),
+        env.DB.prepare(
+          'SELECT revision, (SELECT MAX(MAX(COALESCE(preferredSlot,0),COALESCE(slot,0))) FROM notes) AS lastSlot FROM state WHERE id=1',
+        ),
         env.DB.prepare(
           'SELECT id,teacher,text,slot,revision FROM notes WHERE visible=1 ORDER BY slot',
         ),
       ])
       return json(
-        { revision: current.results[0].revision, notes: notes.results },
+        {
+          revision: current.results[0].revision,
+          lastSlot: current.results[0].lastSlot,
+          notes: notes.results,
+        },
         200,
         { ETag: '"' + current.results[0].revision + '"' },
       )
+    }
+    if (path.startsWith('student/')) {
+      deployment(request, env)
+      if (path === 'student/teachers' && !post) {
+        const rows = await env.DB.prepare(
+          'SELECT DISTINCT teacher FROM notes ORDER BY teacher COLLATE NOCASE',
+        ).all<{ teacher: string }>()
+        const headers: Record<string, string> = {}
+        if (!cookie(request, 'student_device'))
+          headers['Set-Cookie'] = makeCookie(
+            request,
+            env,
+            'student_device',
+            crypto.randomUUID(),
+            86400,
+          )
+        return json(
+          { teachers: rows.results.map((row) => row.teacher) },
+          200,
+          headers,
+        )
+      }
+      if (path === 'student/submit' && post) {
+        if (Number(request.headers.get('content-length')) > 65536)
+          throw new Failure(413, 'This note is too large.')
+        await submit(env, request, await body(65536))
+        return json({ ok: true }, 202)
+      }
     }
     if (path === 'session' && !post)
       return json({
@@ -117,6 +179,12 @@ export const onRequest: PagesFunction<Env> = async ({ request, env }) => {
           demo,
           ...(await overview(env.DB)),
         })
+      if (path === 'admin/review') {
+        requireEditor(session)
+        if (!post) return json(await reviewQueue(env.DB))
+        await review(env.DB, identity, await body())
+        return json({ ok: true })
+      }
       if (!post && path === 'admin/access')
         return json(await accessState(env, session))
       if (!post && path === 'admin/board') return board()

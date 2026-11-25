@@ -33,6 +33,7 @@ type Data = {
   revision: number
   notes: Note[]
   history: Change[]
+  pendingCount: number
   sessions: number
   teachers?: string[]
 }
@@ -186,6 +187,7 @@ function Mark() {
 const sections = [
   ['overview', 'Overview', 'overview'],
   ['notes', 'Notes', 'notes'],
+  ['review', 'Review', 'notes'],
   ['teachers', 'Teachers', 'teachers'],
   ['history', 'Change history', 'history'],
   ['backup', 'Backup & restore', 'backup'],
@@ -194,6 +196,7 @@ const sections = [
 type Route = (typeof sections)[number][0]
 const descriptions: Record<Route, string> = {
   overview: 'A live view of the Teacher Appreciation Wall.',
+  review: 'Read student submissions and choose which notes to publish.',
   notes: 'Read, edit and moderate the notes on the wall.',
   teachers: 'Review each teacher’s notes and visible coverage.',
   history: 'Inspect changes and recover an earlier version of a note.',
@@ -352,35 +355,201 @@ function StateError({ message }: { message: string }) {
 function Blank({ children }: { children: ReactNode }) {
   return <p className="adm-blank">{children}</p>
 }
-function Counts({ data, teachers }: { data: Data; teachers: string[] }) {
-  const occupied = new Set(
-    data.notes.filter((n) => n.visible).map((n) => n.slot),
-  )
-  const visible = data.notes.filter((n) => n.visible).length
-  const zeroBased = occupied.has(0) || !occupied.has(500)
+type Submission = {
+  id: string
+  teacher: string
+  text: string
+  revision: number
+  submittedAt: number
+  expiresAt: number | null
+}
+type Queue = { pending: Submission[]; trash: Submission[] }
+function Review({ updated }: { updated: () => Promise<void> }) {
+  const [queue, setQueue] = useState<Queue | null>(null),
+    [tab, setTab] = useState<keyof Queue>('pending')
+  const [error, setError] = useState(''),
+    [busy, setBusy] = useState(''),
+    [notice, setNotice] = useState('')
+  const seq = useRef(0)
+  const load = useCallback(async () => {
+    const current = ++seq.current
+    try {
+      const next = await api<Queue>('/api/admin/review')
+      if (current === seq.current) {
+        setQueue(next)
+        setError('')
+      }
+    } catch (e) {
+      if (current === seq.current) {
+        if (e instanceof ApiError && [401, 403].includes(e.status))
+          setQueue(null)
+        setError(emptyMessage(e))
+      }
+    }
+  }, [])
+  useEffect(() => {
+    void load()
+    const poll = () => {
+      if (!document.hidden) void load()
+    }
+    const timer = setInterval(poll, 30000)
+    window.addEventListener('focus', poll)
+    return () => {
+      seq.current++
+      clearInterval(timer)
+      window.removeEventListener('focus', poll)
+    }
+  }, [load])
+  useEffect(() => {
+    if (!queue?.trash.length) return
+    const next = queue.trash.reduce(
+      (min, r) => Math.min(min, (r.expiresAt ?? Infinity) * 1000),
+      Infinity,
+    )
+    const timer = setTimeout(
+      () =>
+        setQueue(
+          (q) =>
+            q && {
+              ...q,
+              trash: q.trash.filter(
+                (s) => (s.expiresAt ?? 0) * 1000 > Date.now(),
+              ),
+            },
+        ),
+      Math.max(0, Math.min(next - Date.now() + 10, 2147483647)),
+    )
+    return () => clearTimeout(timer)
+  }, [queue])
+  async function decide(
+    note: Submission,
+    action: 'approve' | 'reject' | 'restore',
+  ) {
+    if (busy) return
+    setBusy(note.id)
+    setError('')
+    setNotice('')
+    try {
+      await api('/api/admin/review', {
+        id: note.id,
+        revision: note.revision,
+        action,
+      })
+      setNotice(
+        action === 'approve'
+          ? 'Note published to the wall.'
+          : action === 'reject'
+            ? 'Note moved to Trash.'
+            : 'Note returned to Pending.',
+      )
+      await load()
+      await updated()
+    } catch (e) {
+      await load()
+      setError(emptyMessage(e))
+    } finally {
+      setBusy('')
+    }
+  }
   return (
-    <section className="adm-capacity" aria-label="Wall capacity">
-      <div className="adm-capinfo">
-        <h2>Wall capacity</h2>
-        <div className="adm-fraction">
-          {visible}
-          <span> / 500</span>
-        </div>
-        <p>visible notes</p>
+    <section className="adm-review" aria-label="Student submissions">
+      <div className="review-tabs" aria-label="Review folders">
+        {(['pending', 'trash'] as const).map((key) => (
+          <button
+            key={key}
+            aria-pressed={tab === key}
+            onClick={() => setTab(key)}
+          >
+            {key === 'pending' ? 'Pending' : 'Trash'}{' '}
+            <span>{queue?.[key].length ?? '…'}</span>
+          </button>
+        ))}
       </div>
-      <div className="adm-mapcol">
-        <div className="adm-slotmap" aria-hidden="true">
-          {Array.from({ length: 500 }, (_, i) => (
-            <i
-              key={i}
-              className={occupied.has(zeroBased ? i : i + 1) ? 'filled' : ''}
-            />
-          ))}
-        </div>
-        <div className="adm-maplegend">
-          <span>{500 - visible} open slots</span>
-          <span>{teachers.length} teachers</span>
-        </div>
+      {error && (
+        <p role="alert" className="adm-warn">
+          {error} <button onClick={() => void load()}>Refresh</button>
+        </p>
+      )}
+      {notice && (
+        <p role="status" className="adm-notice">
+          {notice}
+        </p>
+      )}
+      {tab === 'trash' && (
+        <p className="review-policy">
+          Rejected notes can return to Pending for 30 days.
+        </p>
+      )}
+      {!queue ? (
+        <p aria-live="polite">Loading submissions…</p>
+      ) : queue[tab].length === 0 ? (
+        <p className="adm-panel review-empty">
+          {tab === 'pending'
+            ? 'No notes waiting for review.'
+            : 'Trash is empty.'}
+        </p>
+      ) : (
+        queue[tab].map((note) => (
+          <article className="adm-panel review-letter" key={note.id}>
+            <header>
+              <h2>For {note.teacher}</h2>
+              <small>
+                {tab === 'pending'
+                  ? 'Received ' +
+                    time(new Date(note.submittedAt * 1000).toISOString())
+                  : 'Expires ' +
+                    time(new Date(note.expiresAt! * 1000).toISOString())}
+              </small>
+            </header>
+            <p>{note.text}</p>
+            <footer>
+              {tab === 'pending' ? (
+                <>
+                  <button
+                    className="adm-primary"
+                    disabled={!!busy}
+                    onClick={() => void decide(note, 'approve')}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    className="adm-secondary"
+                    disabled={!!busy}
+                    onClick={() => void decide(note, 'reject')}
+                  >
+                    Reject
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="adm-secondary"
+                  disabled={!!busy}
+                  onClick={() => void decide(note, 'restore')}
+                >
+                  Restore
+                </button>
+              )}
+            </footer>
+          </article>
+        ))
+      )}
+    </section>
+  )
+}
+
+function Counts({ data, teachers }: { data: Data; teachers: string[] }) {
+  const visible = data.notes.filter((n) => n.visible).length
+  return (
+    <section className="adm-capacity" aria-label="Wall collection">
+      <div className="adm-capinfo">
+        <h2>On the wall</h2>
+        <div className="adm-fraction">{visible.toLocaleString()}</div>
+        <p>published notes</p>
+      </div>
+      <div className="adm-capinfo">
+        <h2>Teachers</h2>
+        <div className="adm-fraction">{teachers.length}</div>
+        <p>in the collection</p>
       </div>
     </section>
   )
@@ -404,6 +573,13 @@ function Overview({
       <div className="adm-columns">
         <section className="adm-panel">
           <h2>Moderation desk</h2>
+          {data.role !== 'viewer' && (
+            <RowLink
+              title="Review student notes"
+              detail={data.pendingCount + ' pending'}
+              onClick={() => go('review')}
+            />
+          )}
           {low.slice(0, 2).map((t) => (
             <RowLink
               key={t}
@@ -733,10 +909,6 @@ function Editor({
     [discard, setDiscard] = useState(false)
   const current = data.notes.find((n) => n.id === draft.id)
   const conflict = !!draft.base && current?.revision !== draft.base.revision
-  const full =
-    data.notes.filter((n) => n.visible).length >= 500 &&
-    draft.visible &&
-    !draft.base?.visible
   const coverageWarning =
     draft.base?.visible &&
     (draft.base.teacher !== draft.teacher || !draft.visible) &&
@@ -830,12 +1002,6 @@ function Editor({
             can still save this change.
           </p>
         )}
-        {full && (
-          <p className="adm-warn">
-            All 500 slots are filled. Hide a visible note to free a slot, or
-            save this note as hidden.
-          </p>
-        )}
         {conflict && (
           <div className="adm-warn">
             <strong>The saved revision changed.</strong>
@@ -874,11 +1040,7 @@ function Editor({
             type="submit"
             className="adm-primary"
             disabled={
-              pending ||
-              full ||
-              conflict ||
-              !draft.text.trim() ||
-              !draft.teacher.trim()
+              pending || conflict || !draft.text.trim() || !draft.teacher.trim()
             }
           >
             {pending ? 'Saving…' : error ? 'Retry save' : 'Save note'}
@@ -1282,7 +1444,11 @@ type AccessInfo = {
   managers?: string[]
   admins?: string[]
   members?: { email: string; addedBy: string; addedAt: string }[]
-  passphrase?: { source: 'app' | 'deployment'; updatedBy?: string; updatedAt?: string }
+  passphrase?: {
+    source: 'app' | 'deployment'
+    updatedBy?: string
+    updatedAt?: string
+  }
   sync?: boolean
 }
 const passphraseAlphabet = 'abcdefghjkmnpqrstuvwxyz23456789'
@@ -1429,7 +1595,9 @@ function Access({
   async function reveal() {
     setRevealError('')
     try {
-      setRevealed((await api<{ passphrase: string }>('/api/admin/passphrase')).passphrase)
+      setRevealed(
+        (await api<{ passphrase: string }>('/api/admin/passphrase')).passphrase,
+      )
     } catch (err) {
       setRevealError(emptyMessage(err))
     }
@@ -1517,9 +1685,7 @@ function Access({
               </p>
               <div className="adm-actions">
                 <button
-                  onClick={() =>
-                    revealed ? setRevealed('') : void reveal()
-                  }
+                  onClick={() => (revealed ? setRevealed('') : void reveal())}
                 >
                   {revealed ? 'Hide passphrase' : 'View passphrase'}
                 </button>
@@ -1644,9 +1810,11 @@ function Access({
             <small>
               Signed in as{' '}
               {info
-                ? { manager: 'access manager', admin: 'administrator', viewer: 'read-only member' }[
-                    info.role
-                  ]
+                ? {
+                    manager: 'access manager',
+                    admin: 'administrator',
+                    viewer: 'read-only member',
+                  }[info.role]
                 : ''}
             </small>
             <strong>{data.identity}</strong>
@@ -1686,7 +1854,9 @@ function Access({
               </label>
               <div className="adm-actions">
                 <button
-                  disabled={busy || !newEmail.trim() || (!info?.sync && !data.demo)}
+                  disabled={
+                    busy || !newEmail.trim() || (!info?.sync && !data.demo)
+                  }
                   onClick={() => void addMember()}
                 >
                   {busy && !removing ? 'Adding…' : 'Add member'}
@@ -1722,7 +1892,9 @@ function Access({
               )}
             </div>
             <details>
-              <summary>Full administrators ({info?.admins?.length ?? 0})</summary>
+              <summary>
+                Full administrators ({info?.admins?.length ?? 0})
+              </summary>
               <ul>
                 {(info?.admins || []).map((e) => (
                   <li key={e}>
@@ -1961,24 +2133,26 @@ export default function Admin() {
   }
   const navigation = (
     <nav aria-label="Council navigation">
-      {sections.map(([key, title, icon]) => (
-        <a
-          key={key}
-          href={'/admin' + (key === 'overview' ? '' : '/' + key)}
-          aria-current={route === key ? 'page' : undefined}
-          aria-label={title}
-          data-tip={title}
-          onClick={(e) => {
-            if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
-              e.preventDefault()
-              go(key)
-            }
-          }}
-        >
-          <Icon name={icon} />
-          <span>{title}</span>
-        </a>
-      ))}
+      {sections
+        .filter(([key]) => key !== 'review' || data?.role !== 'viewer')
+        .map(([key, title, icon]) => (
+          <a
+            key={key}
+            href={'/admin' + (key === 'overview' ? '' : '/' + key)}
+            aria-current={route === key ? 'page' : undefined}
+            aria-label={title}
+            data-tip={title}
+            onClick={(e) => {
+              if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+                e.preventDefault()
+                go(key)
+              }
+            }}
+          >
+            <Icon name={icon} />
+            <span>{title}</span>
+          </a>
+        ))}
     </nav>
   )
   if (!data)
@@ -2144,6 +2318,14 @@ export default function Admin() {
               }
             />
           )}
+          {route === 'review' &&
+            (data.role === 'viewer' ? (
+              <Blank>
+                Student review is available to council administrators.
+              </Blank>
+            ) : (
+              <Review updated={refresh} />
+            ))}
           {route === 'teachers' && (
             <Teachers
               key={locationKey}

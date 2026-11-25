@@ -50,6 +50,7 @@ async function closeDialog(page) {
 
 async function unlock(page) {
   assert.equal((await page.goto(baseUrl, { waitUntil: 'networkidle0' })).status(), 200);
+  await page.locator(`::-p-aria([name="I'm a teacher"])`).click();
   const input = await page.waitForSelector('input[type="password"]', { visible: true });
   await input.type('paper-garden');
   await page.keyboard.press('Enter');

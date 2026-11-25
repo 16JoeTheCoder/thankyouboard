@@ -1,3 +1,4 @@
+import { RoleChoice, StudentForm } from './StudentEntry'
 import {
   lazy,
   memo,
@@ -54,12 +55,18 @@ import {
   zoomStep,
 } from './boardView'
 import type { BoardView } from './boardView'
-import { wallSlots } from './wallSlots'
+import { layoutFor, type PaperLayout } from './wallSlots'
 import './wall.css'
 
 const Export = lazy(() => import('./Export'))
 /** Council members preview the wall from the admin area without the teacher passphrase. */
 const council = /^\/admin\/wall(?:\/|$)/.test(location.pathname)
+const entry =
+  council || /^\/teacher\/?$/.test(location.pathname)
+    ? 'teacher'
+    : /^\/student\/?$/.test(location.pathname)
+      ? 'student'
+      : 'choose'
 const sessionUrl = council ? '/api/admin/wall-session' : '/api/session'
 const boardUrl = council ? '/api/admin/board' : '/api/board'
 export type WallNote = {
@@ -180,6 +187,19 @@ function ThemePicker({
     </div>
   )
 }
+function Stationery() {
+  return (
+    <figure className="gate-photo">
+      <img
+        src="/art/council-stationery.webp"
+        alt="A handwritten thank-you card in a green envelope with pressed daisies."
+      />
+      <figcaption>
+        <Flower2 size={16} /> With gratitude, STJBS Student Council
+      </figcaption>
+    </figure>
+  )
+}
 function Gate({
   session,
   onUnlock,
@@ -215,6 +235,9 @@ function Gate({
   return (
     <main className="wall-gate">
       <div className="gate-copy">
+        <a className="entry-back" href="/">
+          <ArrowLeft size={15} /> Back to entrance
+        </a>
         <h1>
           Teacher
           <br />
@@ -270,15 +293,7 @@ function Gate({
           </small>
         )}
       </div>
-      <figure className="gate-photo">
-        <img
-          src="/art/council-stationery.webp"
-          alt="A handwritten thank-you card in a green envelope with pressed daisies."
-        />
-        <figcaption>
-          <Flower2 size={16} /> With gratitude, STJBS Student Council
-        </figcaption>
-      </figure>
+      <Stationery />
     </main>
   )
 }
@@ -354,10 +369,12 @@ function Dedication({ copy, close }: { copy: string; close: () => void }) {
 // without 500 rotated paint layers.
 const PrintedWall = memo(function PrintedWall({
   notes,
+  wallSlots,
   theme,
   view,
   drawer,
 }: {
+  wallSlots: PaperLayout
   notes: WallNote[]
   theme: Theme
   view: MutableRefObject<BoardView>
@@ -377,7 +394,7 @@ const PrintedWall = memo(function PrintedWall({
     function wrap(width: number, height: number) {
       wrappedFor = width
       wrapped = notes.map((note) => {
-        const slot = wallSlots[note.slot]
+        const slot = wallSlots.get(note.slot)!
         if (!slot || !slot.excerpt) return { size: 0, lines: [] }
         const w = Math.max(1, (width * slot.width) / 100 - 0.6),
           h = Math.max(1, (height * slot.height) / 100 - 0.6)
@@ -456,7 +473,7 @@ const PrintedWall = memo(function PrintedWall({
             }
           : null
       notes.forEach((note, index) => {
-        const slot = wallSlots[note.slot]
+        const slot = wallSlots.get(note.slot)!
         if (!slot) return
         const w = Math.max(1, (width * slot.width) / 100 - 0.6),
           h = Math.max(1, (height * slot.height) / 100 - 0.6)
@@ -502,7 +519,8 @@ const PrintedWall = memo(function PrintedWall({
             'italic ' + text.size + 'px "Instrument Serif", Georgia, serif'
           brush.fillStyle = '#382d29'
           brush.textBaseline = 'top'
-          for (const [line, at] of text.lines) brush.fillText(line, w * 0.12, at)
+          for (const [line, at] of text.lines)
+            brush.fillText(line, w * 0.12, at)
         }
         brush.restore()
       })
@@ -519,13 +537,15 @@ const PrintedWall = memo(function PrintedWall({
       if (drawer.current === draw) drawer.current = null
       observer.disconnect()
     }
-  }, [notes, theme, view, drawer])
+  }, [notes, theme, view, drawer, wallSlots])
   return <canvas className="printed-wall" ref={canvas} aria-hidden="true" />
 })
 const Cards = memo(function Cards({
   notes,
+  wallSlots,
   spot,
 }: {
+  wallSlots: PaperLayout
   notes: WallNote[]
   spot: string | null
 }) {
@@ -533,7 +553,7 @@ const Cards = memo(function Cards({
   return (
     <>
       {notes.map((n, i) => {
-        const s = wallSlots[n.slot]
+        const s = wallSlots.get(n.slot)!
         if (!s) return null
         const match = spot === n.teacher
         const style = {
@@ -577,43 +597,50 @@ const Cards = memo(function Cards({
 // of paper buttons. Touch and keyboard access still use the native controls.
 const hitColumns = 48,
   hitRows = 24
-const hitCells: number[][] = Array.from(
-  { length: hitColumns * hitRows },
-  () => [],
-)
-wallSlots.forEach((slot, index) => {
-  const lastCol = Math.min(
-    hitColumns - 1,
-    Math.floor(((slot.left + slot.width) * hitColumns) / 100),
+function indexSlots(wallSlots: PaperLayout) {
+  const hitCells: number[][] = Array.from(
+    { length: hitColumns * hitRows },
+    () => [],
   )
-  const lastRow = Math.min(
-    hitRows - 1,
-    Math.floor(((slot.top + slot.height) * hitRows) / 100),
-  )
-  for (
-    let row = Math.floor((slot.top * hitRows) / 100);
-    row <= lastRow;
-    row++
-  ) {
-    for (
-      let col = Math.floor((slot.left * hitColumns) / 100);
-      col <= lastCol;
-      col++
+  wallSlots.forEach((slot, index) => {
+    const lastCol = Math.min(
+      hitColumns - 1,
+      Math.floor(((slot.left + slot.width) * hitColumns) / 100),
     )
-      hitCells[row * hitColumns + col].push(index)
-  }
-})
+    const lastRow = Math.min(
+      hitRows - 1,
+      Math.floor(((slot.top + slot.height) * hitRows) / 100),
+    )
+    for (
+      let row = Math.floor((slot.top * hitRows) / 100);
+      row <= lastRow;
+      row++
+    ) {
+      for (
+        let col = Math.floor((slot.left * hitColumns) / 100);
+        col <= lastCol;
+        col++
+      )
+        hitCells[row * hitColumns + col].push(index)
+    }
+  })
+  return hitCells
+}
 function BoardArt({
+  lastSlot,
   notes,
   theme,
   spot,
   onNote,
 }: {
+  lastSlot: number
   notes: WallNote[]
   spot: string | null
   theme: Theme
   onNote: (id: string) => void
 }) {
+  const wallSlots = useMemo(() => layoutFor(notes, lastSlot), [notes, lastSlot])
+  const hitCells = useMemo(() => indexSlots(wallSlots), [wallSlots])
   const byId = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes])
   const board = useRef<HTMLDivElement>(null)
   const hitPlane = useRef<HTMLDivElement>(null)
@@ -760,8 +787,12 @@ function BoardArt({
     const touches = new Map<number, { x: number; y: number }>()
     let drag: { id: number; x: number; y: number; moving: boolean } | null =
       null
-    let pinch: { span: number; cx: number; cy: number; view: BoardView } | null =
-      null
+    let pinch: {
+      span: number
+      cx: number
+      cy: number
+      view: BoardView
+    } | null = null
     let swallow = false
     const middle = () => {
       const [a, b] = Array.from(touches.values())
@@ -894,7 +925,7 @@ function BoardArt({
       if (note === current.current && (!immediate || !preview.current?.hidden))
         return
       clear()
-      const slot = note && wallSlots[note.slot]
+      const slot = note && wallSlots.get(note.slot)!
       if (!note || !slot) return
       current.current = note
       const { width, height } = size.current
@@ -930,10 +961,7 @@ function BoardArt({
         const below = s > 1 ? (y - seenTop) * s < 86 : slot!.top < 22
         previewEl.style.left =
           (s > 1
-            ? Math.max(
-                seenLeft + half,
-                Math.min(seenRight - half, x + w / 2),
-              )
+            ? Math.max(seenLeft + half, Math.min(seenRight - half, x + w / 2))
             : Math.max(85, Math.min(width - 85, x + w / 2))) + 'px'
         previewEl.style.top = (below ? y + h + 4 / s : y - 4 / s) + 'px'
         previewEl.classList.toggle('peek-below', below)
@@ -944,7 +972,7 @@ function BoardArt({
       if (immediate) printPreview()
       else reveal.current = setTimeout(printPreview, 95)
     },
-    [clear],
+    [clear, wallSlots],
   )
   const hit = useCallback(
     (x: number, y: number) => {
@@ -958,7 +986,7 @@ function BoardArt({
             Math.floor((u * hitColumns) / 100)
         ]
       const index = cell?.find((i) => {
-        const s = wallSlots[i]
+        const s = wallSlots.get(i)!
         return (
           u >= s.left &&
           u < s.left + s.width &&
@@ -968,7 +996,7 @@ function BoardArt({
       })
       return index === undefined ? undefined : visibleBySlot.get(index)
     },
-    [visibleBySlot],
+    [visibleBySlot, hitCells, wallSlots],
   )
   useEffect(() => {
     const surface = hitPlane.current!
@@ -1011,7 +1039,7 @@ function BoardArt({
         onFocus={(e) => {
           const note = byId.get((e.target as HTMLElement).dataset.id || '')
           // Keyboard users moving between notes must never lose the focused one off screen.
-          const slot = note && wallSlots[note.slot]
+          const slot = note && wallSlots.get(note.slot)!
           if (slot && (e.target as HTMLElement).matches(':focus-visible'))
             setView(revealRect(view.current, slot))
           activate(note, true)
@@ -1088,6 +1116,7 @@ function BoardArt({
         }}
       >
         <PrintedWall
+          wallSlots={wallSlots}
           notes={notes}
           theme={theme}
           view={view}
@@ -1095,7 +1124,7 @@ function BoardArt({
         />
         <div ref={pan} className="board-pan">
           <div className="paper-base">
-            <Cards notes={notes} spot={spot} />
+            <Cards wallSlots={wallSlots} notes={notes} spot={spot} />
           </div>
           <span aria-hidden="true" className="board-postmark">
             <Mail />
@@ -1427,6 +1456,7 @@ export default function Wall() {
     return themes.find((t) => t === saved) || 'Original'
   })
   const [dedication, setDedication] = useState(false),
+    [lastSlot, setLastSlot] = useState(499),
     [notes, setNotes] = useState<WallNote[]>([]),
     [loaded, setLoaded] = useState(false)
   const [panel, setPanel] = useState<Panel | null>(null),
@@ -1483,7 +1513,7 @@ export default function Wall() {
     }
   }, [])
   useEffect(() => {
-    void loadSession()
+    if (entry === 'teacher') void loadSession()
   }, [loadSession])
   const refresh = useCallback((): Promise<WallNote[]> => {
     if (flight.current) return flight.current
@@ -1506,10 +1536,11 @@ export default function Wall() {
           return cache.current.notes
         }
         if (!r.ok) throw new Error(await apiError(r))
-        const data: { notes: WallNote[] } = await r.json()
+        const data: { notes: WallNote[]; lastSlot: number } = await r.json()
         if (version !== epoch.current) throw new Error('Session changed.')
         const next = data.notes.slice().sort((a, b) => a.slot - b.slot)
         cache.current = { etag: r.headers.get('ETag'), notes: next }
+        setLastSlot(data.lastSlot ?? next.at(-1)?.slot ?? 499)
         setNotes(next)
         setLoaded(true)
         setError('')
@@ -1591,15 +1622,18 @@ export default function Wall() {
     if (lit) viewButton.current?.focus({ preventScroll: true })
   }, [lit])
   useEffect(() => {
-    const sync = () => setFull(document.fullscreenElement === collection.current)
+    const sync = () =>
+      setFull(document.fullscreenElement === collection.current)
     document.addEventListener('fullscreenchange', sync)
     return () => document.removeEventListener('fullscreenchange', sync)
   }, [])
   function toggleFull() {
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+    if (document.fullscreenElement)
+      void document.exitFullscreen().catch(() => {})
     else void collection.current?.requestFullscreen().catch(() => {})
   }
-  const canFull = typeof document !== 'undefined' && !!document.fullscreenEnabled
+  const canFull =
+    typeof document !== 'undefined' && !!document.fullscreenEnabled
   function openPanel(p: Panel) {
     cancel()
     setPanel(p)
@@ -1643,7 +1677,12 @@ export default function Wall() {
           )}
         </div>
       </header>
-      {!session ? (
+      {entry !== 'teacher' ? (
+        <main className={'wall-gate entry-' + entry}>
+          {entry === 'choose' ? <RoleChoice /> : <StudentForm />}
+          <Stationery />
+        </main>
+      ) : !session ? (
         <main className="wall-wait">
           {failure ? (
             <>
@@ -1773,6 +1812,7 @@ export default function Wall() {
               <p className="wall-empty">There are no visible notes yet.</p>
             ) : (
               <BoardArt
+                lastSlot={lastSlot}
                 theme={theme}
                 notes={notes}
                 spot={lit}

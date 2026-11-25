@@ -4,5 +4,5 @@
     "lib": ["ES2022"],
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["functions", "server"]
+  "include": ["functions", "server", "maintenance"]
 }

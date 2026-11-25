@@ -3,7 +3,7 @@ import { Failure, cookie, digest, isDemo, makeCookie, type Env } from './types'
 const day = 86400
 const now = () => Math.floor(Date.now() / 1000)
 const keys = new Map<string, ReturnType<typeof createRemoteJWKSet>>()
-function deployment(request: Request, env: Env) {
+export function deployment(request: Request, env: Env) {
   if (
     !isDemo(request, env) &&
     (new URL(request.url).protocol !== 'https:' ||
