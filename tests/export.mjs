@@ -57,6 +57,7 @@ function inScope(page, scope) {
 
 async function unlock(page) {
   assert.equal((await page.goto(origin.href, { waitUntil: 'domcontentloaded' })).status(), 200);
+  await page.locator(`::-p-aria([name="I'm a teacher"][role="link"])`).click();
   await page.waitForSelector('input[type="password"]', { visible: true });
   await page.type('input[type="password"]', 'paper-garden');
   await page.keyboard.press('Enter');

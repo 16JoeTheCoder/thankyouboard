@@ -47,7 +47,7 @@ async function readWall(db: D1Database) {
   }
 }
 export async function overview(db: D1Database) {
-  const [state, notes, events, sessions] = await db.batch<
+  const [state, notes, events, sessions, pending] = await db.batch<
     Record<string, unknown>
   >([
     db.prepare('SELECT revision FROM state WHERE id=1'),
@@ -55,6 +55,9 @@ export async function overview(db: D1Database) {
     db.prepare('SELECT * FROM history ORDER BY id DESC'),
     db.prepare(
       'SELECT COUNT(*) AS count FROM sessions WHERE expires>unixepoch()',
+    ),
+    db.prepare(
+      "SELECT count(*) AS count FROM student_submissions WHERE status='pending'",
     ),
   ])
   return {
@@ -66,6 +69,7 @@ export async function overview(db: D1Database) {
       after: e.after ? JSON.parse(e.after) : null,
     })),
     sessions: sessions.results[0].count,
+    pendingCount: pending.results[0].count,
   }
 }
 export async function backup(db: D1Database) {
@@ -80,11 +84,9 @@ function freeSlot(notes: Note[], id: string, preferred: number | null) {
     notes.filter((n) => n.id !== id && n.visible).map((n) => n.slot),
   )
   if (preferred !== null && !occupied.has(preferred)) return preferred
-  for (let i = 0; i < 500; i++) if (!occupied.has(i)) return i
-  throw new Failure(
-    409,
-    'The wall is full. Hide a note to free a slot, then try again.',
-  )
+  let slot = 0
+  while (occupied.has(slot)) slot++
+  return slot
 }
 interface Change {
   before: Note | null
@@ -100,8 +102,7 @@ function same(a: Note, b: Note) {
     a.preferredSlot === b.preferredSlot
   )
 }
-const validSlot = (s: unknown) =>
-  Number.isInteger(s) && Number(s) >= 0 && Number(s) < 500
+const validSlot = (s: unknown) => Number.isSafeInteger(s) && Number(s) >= 0
 function recovery(
   notes: Note[],
   revision: number,

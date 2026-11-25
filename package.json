@@ -16,7 +16,9 @@
     "qa:admin": "node tests/admin.mjs",
     "qa:export": "node tests/export.mjs",
     "qa:seed": "node tests/seed.mjs",
-    "qa:access": "node tests/access.mjs"
+    "qa:access": "node tests/access.mjs",
+    "qa:submissions": "node tests/submissions.mjs",
+    "qa:student-ui": "node tests/student-ui.mjs"
   },
   "dependencies": {
     "@fontsource/dm-sans": "^5.3.0",

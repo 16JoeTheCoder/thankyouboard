@@ -85,6 +85,7 @@ async function waitForWall(page) {
 
 async function unlock(page, { invalid = false } = {}) {
   assert.equal((await page.goto(baseUrl, { waitUntil: 'networkidle0' })).status(), 200);
+  await clickControl(page, /^I'm a teacher$/i);
   const input = await page.waitForSelector('input[type="password"]', { visible: true });
   assert(input, 'Teacher gate should request a passphrase');
   if (invalid) {

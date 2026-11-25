@@ -16,8 +16,8 @@ export function wrangler(args, options = {}) {
 
 export function seed(input, dbArgs) {
   const rows = input?.notes
-  if (!Array.isArray(rows) || rows.length !== 500)
-    throw new Error('Exactly 500 notes are required.')
+  if (!Array.isArray(rows) || rows.length < 500)
+    throw new Error('At least 500 notes are required.')
   const ids = new Set(),
     counts = new Map()
   const notes = rows
@@ -75,5 +75,5 @@ export function seed(input, dbArgs) {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
-  console.log('Seed verified: 500 distinct notes, 41 teachers.')
+  console.log(`Seed verified: ${rows.length} distinct notes, 41 teachers.`)
 }

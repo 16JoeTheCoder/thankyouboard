@@ -1025,3 +1025,69 @@
   display: block;
   opacity: 0.7;
 }
+.adm-review {
+  max-width: 850px;
+}
+.review-tabs {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 20px;
+}
+.review-tabs button {
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: transparent;
+}
+.review-tabs button[aria-pressed='true'] {
+  background: #234a3a;
+  color: #fffaf0;
+  border-color: #234a3a;
+}
+.review-tabs span {
+  font-variant-numeric: tabular-nums;
+  margin-left: 5px;
+}
+.review-letter {
+  margin: 14px 0;
+}
+.review-letter header,
+.review-letter footer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.review-letter header {
+  justify-content: space-between;
+}
+.review-letter header small,
+.review-policy {
+  color: var(--muted);
+}
+.review-letter > p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    1.15rem/1.55 Georgia,
+    serif;
+  max-width: 68ch;
+  margin: 20px 0;
+}
+.review-letter footer {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.adm .review-tabs button[aria-pressed='true']:hover {
+  background: var(--forest);
+  color: #fffaf0;
+}
+@media (max-width: 680px) {
+  .review-tabs button,
+  .review-letter footer button {
+    min-height: 44px;
+  }
+}
