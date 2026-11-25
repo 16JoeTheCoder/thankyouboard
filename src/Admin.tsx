@@ -660,11 +660,13 @@ function Search({
 }
 function Notes({
   notes,
+  history,
   teachers,
   params,
   onEdit,
 }: {
   notes: Note[]
+  history: Change[]
   teachers: string[]
   params: URLSearchParams
   onEdit: (n: Note) => void
@@ -672,17 +674,41 @@ function Notes({
   const [search, setSearch] = useState(params.get('q') || ''),
     [teacher, setTeacher] = useState(params.get('teacher') || ''),
     [status, setStatus] = useState(params.get('status') || ''),
+    [length, setLength] = useState(''),
+    [sort, setSort] = useState(''),
     [page, setPage] = useState(0)
   const query = search.trim().toLowerCase()
-  const found = notes.filter(
-    (n) =>
-      (!teacher || n.teacher === teacher) &&
-      (!status || n.visible === (status === 'visible')) &&
-      (!query ||
-        [n.id, n.text, n.teacher, n.visible ? 'visible' : 'hidden'].some((s) =>
-          s.toLowerCase().includes(query),
-        )),
-  )
+  // Notes carry no created date, so "recent" is the latest recorded change.
+  const changed = new Map<string, number>()
+  for (const h of history)
+    changed.set(h.noteId, Math.max(changed.get(h.noteId) || 0, h.id))
+  const lengthOk = (n: Note) =>
+    !length ||
+    (length === 'short' && n.text.length < 100) ||
+    (length === 'medium' && n.text.length >= 100 && n.text.length <= 300) ||
+    (length === 'long' && n.text.length > 300)
+  const found = notes
+    .filter(
+      (n) =>
+        (!teacher || n.teacher === teacher) &&
+        (!status || n.visible === (status === 'visible')) &&
+        lengthOk(n) &&
+        (!query ||
+          [n.id, n.text, n.teacher, n.visible ? 'visible' : 'hidden'].some(
+            (s) => s.toLowerCase().includes(query),
+          )),
+    )
+    .sort((a, b) =>
+      sort === 'recent'
+        ? (changed.get(b.id) || 0) - (changed.get(a.id) || 0)
+        : sort === 'longest'
+          ? b.text.length - a.text.length
+          : sort === 'shortest'
+            ? a.text.length - b.text.length
+            : sort === 'teacher'
+              ? a.teacher.localeCompare(b.teacher)
+              : 0,
+    )
   const current = Math.min(page, Math.max(0, Math.ceil(found.length / 20) - 1))
   return (
     <>
@@ -719,6 +745,33 @@ function Notes({
           <option value="">All statuses</option>
           <option value="visible">Visible</option>
           <option value="hidden">Hidden</option>
+        </select>
+        <select
+          aria-label="Filter by length"
+          value={length}
+          onChange={(e) => {
+            setLength(e.target.value)
+            setPage(0)
+          }}
+        >
+          <option value="">Any length</option>
+          <option value="short">Short (under 100 characters)</option>
+          <option value="medium">Medium (100 to 300)</option>
+          <option value="long">Long (over 300)</option>
+        </select>
+        <select
+          aria-label="Sort notes"
+          value={sort}
+          onChange={(e) => {
+            setSort(e.target.value)
+            setPage(0)
+          }}
+        >
+          <option value="">Default order</option>
+          <option value="recent">Recently changed first</option>
+          <option value="longest">Longest first</option>
+          <option value="shortest">Shortest first</option>
+          <option value="teacher">Teacher A to Z</option>
         </select>
       </div>
       <div className="adm-datatable">
@@ -801,24 +854,47 @@ function Teachers({
   open: (t: string) => void
 }) {
   const [search, setSearch] = useState(''),
-    [low, setLow] = useState(initialLow)
-  const found = teachers.filter(
-    (t) =>
-      t.toLowerCase().includes(search.trim().toLowerCase()) &&
-      (!low || (coverage.get(t) || 0) < 3),
-  )
+    [below, setBelow] = useState(initialLow ? '3' : ''),
+    [sort, setSort] = useState('')
+  const count = (t: string) => coverage.get(t) || 0
+  const found = teachers
+    .filter(
+      (t) =>
+        t.toLowerCase().includes(search.trim().toLowerCase()) &&
+        (below === '' || count(t) < Number(below)),
+    )
+    .sort((a, b) =>
+      sort === 'most'
+        ? count(b) - count(a) || a.localeCompare(b)
+        : sort === 'fewest'
+          ? count(a) - count(b) || a.localeCompare(b)
+          : 0,
+    )
   return (
     <>
       <div className="adm-tools">
         <Search label="Search teachers" value={search} onChange={setSearch} />
         <label className="adm-check">
+          Fewer than{' '}
           <input
-            type="checkbox"
-            checked={low}
-            onChange={(e) => setLow(e.target.checked)}
+            type="number"
+            min="1"
+            inputMode="numeric"
+            style={{ width: '4.5em' }}
+            value={below}
+            onChange={(e) => setBelow(e.target.value)}
           />{' '}
-          Below three visible notes
+          visible notes
         </label>
+        <select
+          aria-label="Sort teachers"
+          value={sort}
+          onChange={(e) => setSort(e.target.value)}
+        >
+          <option value="">Name A to Z</option>
+          <option value="most">Most notes first</option>
+          <option value="fewest">Fewest notes first</option>
+        </select>
       </div>
       <div className="adm-datatable">
         <table>
@@ -2305,6 +2381,7 @@ export default function Admin() {
             <Notes
               key={locationKey}
               notes={data.notes}
+              history={data.history}
               teachers={teachers}
               params={params}
               onEdit={(n) =>
